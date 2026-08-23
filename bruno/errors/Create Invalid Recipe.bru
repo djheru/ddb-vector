@@ -1,0 +1,23 @@
+meta {
+  name: Create Invalid Recipe
+  type: http
+  seq: 1
+}
+
+post {
+  url: {{baseUrl}}/recipes
+  body: json
+  auth: none
+}
+
+body:json {
+  {
+    "cuisine": "mexican",
+    "description": "Missing the required name and ingredients fields.",
+    "steps": ["This body should never reach the Lambda"]
+  }
+}
+
+assert {
+  res.status: eq 400
+}

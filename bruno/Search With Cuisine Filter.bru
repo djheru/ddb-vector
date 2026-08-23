@@ -1,0 +1,33 @@
+meta {
+  name: Search With Cuisine Filter
+  type: http
+  seq: 5
+}
+
+post {
+  url: {{baseUrl}}/recipes/search
+  body: json
+  auth: none
+}
+
+body:json {
+  {
+    "query": "something spicy",
+    "cuisine": "mexican",
+    "topK": 3
+  }
+}
+
+assert {
+  res.status: eq 200
+}
+
+tests {
+  test("every result is mexican", function () {
+    const results = res.getBody().results;
+    expect(results).to.be.an("array");
+    results.forEach(function (result) {
+      expect(result.cuisine).to.equal("mexican");
+    });
+  });
+}

@@ -1,0 +1,31 @@
+meta {
+  name: Update Missing Recipe
+  type: http
+  seq: 3
+}
+
+put {
+  url: {{baseUrl}}/recipes/8f1e4a5e-7c3d-4b2a-9e6f-013579bdf246
+  body: json
+  auth: none
+}
+
+body:json {
+  {
+    "name": "Ghost Recipe",
+    "cuisine": "french",
+    "dietary": [],
+    "prepTimeMinutes": 5,
+    "cookTimeMinutes": 10,
+    "servings": 2,
+    "description": "A perfectly valid body aimed at a recipe that does not exist.",
+    "ingredients": [
+      { "name": "thin air", "amount": "1", "unit": "cup" }
+    ],
+    "steps": ["Exercise the conditional write path"]
+  }
+}
+
+assert {
+  res.status: eq 404
+}

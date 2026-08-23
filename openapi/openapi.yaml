@@ -1,0 +1,605 @@
+openapi: 3.0.0
+info:
+  version: 1.0.0
+  title: Recipe API
+  description: Recipe CRUD API with semantic vector search powered by Amazon Bedrock
+
+tags:
+  - name: Recipe
+    description: Recipe CRUD operations
+  - name: Search
+    description: Semantic search
+
+x-amazon-apigateway-api-key-source: HEADER
+
+x-amazon-apigateway-request-validators:
+  Validate body, query string parameters, and headers:
+    validateRequestParameters: true
+    validateRequestBody: true
+
+x-amazon-apigateway-gateway-responses:
+  BAD_REQUEST_BODY:
+    statusCode: 400
+    responseTemplates:
+      application/json: '{ "message": "$context.error.validationErrorString" }'
+  DEFAULT_5XX:
+    statusCode: 500
+    responseTemplates:
+      application/json: '{ "message": "Internal server error" }'
+
+paths:
+  /recipes:
+    post:
+      summary: Create a recipe
+      operationId: createRecipe
+      description: Creates a new recipe and generates a vector embedding for semantic search.
+      tags:
+        - Recipe
+      security:
+        - ApiKeyAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RecipeInput'
+            example:
+              name: Spaghetti Carbonara
+              cuisine: italian
+              dietary: []
+              prepTimeMinutes: 10
+              cookTimeMinutes: 20
+              servings: 4
+              description: Classic Roman pasta with eggs, cheese, pancetta, and black pepper.
+              ingredients:
+                - name: spaghetti
+                  amount: "400"
+                  unit: g
+                - name: pancetta
+                  amount: "200"
+                  unit: g
+                - name: egg yolks
+                  amount: "6"
+                  unit: large
+                - name: pecorino romano
+                  amount: "100"
+                  unit: g
+              steps:
+                - Boil pasta until al dente
+                - Cook pancetta until crispy
+                - Mix egg yolks with grated pecorino
+                - Toss hot pasta with pancetta off heat, then stir in egg mixture
+      responses:
+        '201':
+          description: Recipe created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CreateRecipeResponse'
+          links:
+            GetCreatedRecipe:
+              operationId: getRecipe
+              parameters:
+                recipeId: $response.body#/recipeId
+              description: Retrieve the newly created recipe
+            UpdateCreatedRecipe:
+              operationId: updateRecipe
+              parameters:
+                recipeId: $response.body#/recipeId
+              description: Update the newly created recipe
+            DeleteCreatedRecipe:
+              operationId: deleteRecipe
+              parameters:
+                recipeId: $response.body#/recipeId
+              description: Delete the newly created recipe
+        '400':
+          $ref: '#/components/responses/badRequest'
+        '403':
+          $ref: '#/components/responses/forbidden'
+        '500':
+          $ref: '#/components/responses/unexpectedError'
+      x-amazon-apigateway-request-validator: Validate body, query string parameters, and headers
+      x-amazon-apigateway-integration:
+        uri: 'arn:${Partition}:apigateway:${Region}:lambda:path/2015-03-31/functions/${CreateRecipeFunctionArn}/invocations'
+        httpMethod: POST
+        type: aws_proxy
+
+  /recipes/{recipeId}:
+    get:
+      summary: Get a recipe
+      operationId: getRecipe
+      description: Retrieves a recipe by its ID. The stored embedding vector is never returned.
+      tags:
+        - Recipe
+      security:
+        - ApiKeyAuth: []
+      parameters:
+        - $ref: '#/components/parameters/recipeId'
+      responses:
+        '200':
+          description: Recipe found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Recipe'
+        '400':
+          $ref: '#/components/responses/badRequest'
+        '403':
+          $ref: '#/components/responses/forbidden'
+        '404':
+          $ref: '#/components/responses/notFound'
+        '500':
+          $ref: '#/components/responses/unexpectedError'
+      x-amazon-apigateway-request-validator: Validate body, query string parameters, and headers
+      x-amazon-apigateway-integration:
+        uri: 'arn:${Partition}:apigateway:${Region}:lambda:path/2015-03-31/functions/${GetRecipeFunctionArn}/invocations'
+        httpMethod: POST
+        type: aws_proxy
+
+    put:
+      summary: Update a recipe
+      operationId: updateRecipe
+      description: Replaces an existing recipe and regenerates its vector embedding.
+      tags:
+        - Recipe
+      security:
+        - ApiKeyAuth: []
+      parameters:
+        - $ref: '#/components/parameters/recipeId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RecipeInput'
+            example:
+              name: Spaghetti Carbonara (Spicy)
+              cuisine: italian
+              dietary: []
+              prepTimeMinutes: 10
+              cookTimeMinutes: 20
+              servings: 4
+              description: Spicy Roman pasta with eggs, cheese, pancetta, chili flakes, and black pepper.
+              ingredients:
+                - name: spaghetti
+                  amount: "400"
+                  unit: g
+                - name: pancetta
+                  amount: "200"
+                  unit: g
+                - name: egg yolks
+                  amount: "6"
+                  unit: large
+                - name: pecorino romano
+                  amount: "100"
+                  unit: g
+                - name: chili flakes
+                  amount: "1"
+                  unit: tsp
+              steps:
+                - Boil pasta until al dente
+                - Cook pancetta with chili flakes until crispy
+                - Mix egg yolks with grated pecorino
+                - Toss hot pasta with pancetta off heat, then stir in egg mixture
+      responses:
+        '200':
+          description: Recipe updated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UpdateRecipeResponse'
+          links:
+            GetUpdatedRecipe:
+              operationId: getRecipe
+              parameters:
+                recipeId: $response.body#/recipeId
+              description: Retrieve the updated recipe
+            DeleteUpdatedRecipe:
+              operationId: deleteRecipe
+              parameters:
+                recipeId: $response.body#/recipeId
+              description: Delete the updated recipe
+        '400':
+          $ref: '#/components/responses/badRequest'
+        '403':
+          $ref: '#/components/responses/forbidden'
+        '404':
+          $ref: '#/components/responses/notFound'
+        '500':
+          $ref: '#/components/responses/unexpectedError'
+      x-amazon-apigateway-request-validator: Validate body, query string parameters, and headers
+      x-amazon-apigateway-integration:
+        uri: 'arn:${Partition}:apigateway:${Region}:lambda:path/2015-03-31/functions/${UpdateRecipeFunctionArn}/invocations'
+        httpMethod: POST
+        type: aws_proxy
+
+    delete:
+      summary: Delete a recipe
+      operationId: deleteRecipe
+      description: Deletes a recipe by its ID.
+      tags:
+        - Recipe
+      security:
+        - ApiKeyAuth: []
+      parameters:
+        - $ref: '#/components/parameters/recipeId'
+      responses:
+        '200':
+          description: Recipe deleted
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MessageResponse'
+        '403':
+          $ref: '#/components/responses/forbidden'
+        '404':
+          $ref: '#/components/responses/notFound'
+        '500':
+          $ref: '#/components/responses/unexpectedError'
+      x-amazon-apigateway-request-validator: Validate body, query string parameters, and headers
+      x-amazon-apigateway-integration:
+        uri: 'arn:${Partition}:apigateway:${Region}:lambda:path/2015-03-31/functions/${DeleteRecipeFunctionArn}/invocations'
+        httpMethod: POST
+        type: aws_proxy
+
+  /recipes/search:
+    post:
+      summary: Search recipes
+      operationId: searchRecipes
+      description: >-
+        Performs semantic vector search across all recipes using a
+        natural-language query, optionally filtered to a single cuisine via the
+        vector index inline filter.
+      tags:
+        - Search
+      security:
+        - ApiKeyAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SearchInput'
+            example:
+              query: something spicy with chicken
+              cuisine: mexican
+              topK: 5
+      responses:
+        '200':
+          description: Search results ordered by similarity, highest first
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SearchResponse'
+        '400':
+          $ref: '#/components/responses/badRequest'
+        '403':
+          $ref: '#/components/responses/forbidden'
+        '500':
+          $ref: '#/components/responses/unexpectedError'
+      x-amazon-apigateway-request-validator: Validate body, query string parameters, and headers
+      x-amazon-apigateway-integration:
+        uri: 'arn:${Partition}:apigateway:${Region}:lambda:path/2015-03-31/functions/${SearchRecipesFunctionArn}/invocations'
+        httpMethod: POST
+        type: aws_proxy
+
+components:
+  securitySchemes:
+    ApiKeyAuth:
+      type: apiKey
+      in: header
+      name: x-api-key
+
+  parameters:
+    recipeId:
+      name: recipeId
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+      description: Unique recipe identifier
+      example: 550e8400-e29b-41d4-a716-446655440000
+
+  schemas:
+    Ingredient:
+      type: object
+      additionalProperties: false
+      required:
+        - name
+        - amount
+        - unit
+      properties:
+        name:
+          type: string
+          minLength: 2
+          maxLength: 100
+        amount:
+          type: string
+          minLength: 1
+          maxLength: 20
+        unit:
+          type: string
+          minLength: 1
+          maxLength: 30
+
+    RecipeInput:
+      type: object
+      additionalProperties: false
+      required:
+        - name
+        - cuisine
+        - description
+        - ingredients
+        - steps
+      properties:
+        name:
+          type: string
+          minLength: 2
+          maxLength: 200
+        cuisine:
+          type: string
+          minLength: 2
+          maxLength: 100
+          pattern: '^[a-zA-Z][a-zA-Z\s\-]+$'
+        dietary:
+          type: array
+          items:
+            type: string
+            minLength: 2
+            maxLength: 50
+            pattern: '^[a-zA-Z][a-zA-Z\s\-]+$'
+          maxItems: 20
+        prepTimeMinutes:
+          type: integer
+          minimum: 0
+          maximum: 10080
+        cookTimeMinutes:
+          type: integer
+          minimum: 0
+          maximum: 10080
+        servings:
+          type: integer
+          minimum: 1
+          maximum: 1000
+        description:
+          type: string
+          minLength: 10
+          maxLength: 2000
+        ingredients:
+          type: array
+          items:
+            $ref: '#/components/schemas/Ingredient'
+          minItems: 1
+          maxItems: 100
+        steps:
+          type: array
+          items:
+            type: string
+            minLength: 5
+            maxLength: 1000
+          minItems: 1
+          maxItems: 50
+
+    # Spelled out rather than composed with allOf: RecipeInput sets
+    # additionalProperties false, which would make any object carrying recipeId
+    # fail that allOf branch under strict schema validation.
+    Recipe:
+      type: object
+      required:
+        - recipeId
+        - name
+        - cuisine
+        - description
+        - ingredients
+        - steps
+      properties:
+        recipeId:
+          type: string
+          format: uuid
+        name:
+          type: string
+          minLength: 2
+          maxLength: 200
+        cuisine:
+          type: string
+          minLength: 2
+          maxLength: 100
+          pattern: '^[a-zA-Z][a-zA-Z\s\-]+$'
+        dietary:
+          type: array
+          items:
+            type: string
+            minLength: 2
+            maxLength: 50
+            pattern: '^[a-zA-Z][a-zA-Z\s\-]+$'
+          maxItems: 20
+        prepTimeMinutes:
+          type: integer
+          minimum: 0
+          maximum: 10080
+        cookTimeMinutes:
+          type: integer
+          minimum: 0
+          maximum: 10080
+        servings:
+          type: integer
+          minimum: 1
+          maximum: 1000
+        description:
+          type: string
+          minLength: 10
+          maxLength: 2000
+        ingredients:
+          type: array
+          items:
+            $ref: '#/components/schemas/Ingredient'
+          minItems: 1
+          maxItems: 100
+        steps:
+          type: array
+          items:
+            type: string
+            minLength: 5
+            maxLength: 1000
+          minItems: 1
+          maxItems: 50
+
+    CreateRecipeResponse:
+      type: object
+      required:
+        - recipeId
+        - message
+      properties:
+        recipeId:
+          type: string
+          format: uuid
+        message:
+          type: string
+          enum:
+            - Recipe created
+
+    UpdateRecipeResponse:
+      type: object
+      required:
+        - recipeId
+        - message
+      properties:
+        recipeId:
+          type: string
+          format: uuid
+        message:
+          type: string
+          enum:
+            - Recipe updated
+
+    MessageResponse:
+      type: object
+      required:
+        - message
+      properties:
+        message:
+          type: string
+
+    SearchInput:
+      type: object
+      additionalProperties: false
+      required:
+        - query
+      properties:
+        query:
+          type: string
+          minLength: 1
+          maxLength: 1000
+        cuisine:
+          type: string
+          minLength: 2
+          maxLength: 100
+          pattern: '^[a-zA-Z][a-zA-Z\s\-]+$'
+          description: Optional inline filter; only recipes of this cuisine are searched.
+        topK:
+          type: integer
+          minimum: 1
+          maximum: 25
+          description: Maximum number of results to return. Defaults to 5.
+
+    SearchResult:
+      type: object
+      additionalProperties: false
+      required:
+        - recipeId
+        - name
+        - similarity
+        - distance
+      properties:
+        recipeId:
+          type: string
+          format: uuid
+        name:
+          type: string
+        cuisine:
+          type: string
+        description:
+          type: string
+        dietary:
+          type: array
+          items:
+            type: string
+        prepTimeMinutes:
+          type: number
+        cookTimeMinutes:
+          type: number
+        servings:
+          type: number
+        similarity:
+          type: number
+          minimum: -1
+          maximum: 1
+          description: 1 minus the cosine distance; higher is better.
+        distance:
+          type: number
+          minimum: 0
+          description: Raw engine score; cosine distance where 0 means identical.
+
+    SearchResponse:
+      type: object
+      required:
+        - query
+        - results
+      properties:
+        query:
+          type: string
+        cuisine:
+          type: string
+          description: Echoed back when the request filtered by cuisine.
+        results:
+          type: array
+          items:
+            $ref: '#/components/schemas/SearchResult'
+
+    ErrorResponse:
+      type: object
+      required:
+        - error
+      properties:
+        error:
+          type: string
+
+    GatewayErrorResponse:
+      type: object
+      required:
+        - message
+      properties:
+        message:
+          type: string
+
+  responses:
+    badRequest:
+      description: Bad request
+      content:
+        application/json:
+          schema:
+            oneOf:
+              - $ref: '#/components/schemas/GatewayErrorResponse'
+              - $ref: '#/components/schemas/ErrorResponse'
+
+    forbidden:
+      description: Missing or invalid API key
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/GatewayErrorResponse'
+
+    notFound:
+      description: Resource not found
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+
+    unexpectedError:
+      description: Unexpected error
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'

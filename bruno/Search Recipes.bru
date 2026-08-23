@@ -1,0 +1,34 @@
+meta {
+  name: Search Recipes
+  type: http
+  seq: 4
+}
+
+post {
+  url: {{baseUrl}}/recipes/search
+  body: json
+  auth: none
+}
+
+body:json {
+  {
+    "query": "hot and hearty poultry dish"
+  }
+}
+
+assert {
+  res.status: eq 200
+}
+
+tests {
+  test("results is an array", function () {
+    expect(res.getBody().results).to.be.an("array");
+  });
+
+  test("results are sorted by similarity descending", function () {
+    const results = res.getBody().results;
+    for (let i = 1; i < results.length; i++) {
+      expect(results[i - 1].similarity).to.be.at.least(results[i].similarity);
+    }
+  });
+}

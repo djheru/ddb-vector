@@ -1,0 +1,34 @@
+meta {
+  name: Update Recipe
+  type: http
+  seq: 3
+}
+
+put {
+  url: {{baseUrl}}/recipes/{{recipeId}}
+  body: json
+  auth: none
+}
+
+body:json {
+  {
+    "name": "Spicy Chicken Stew",
+    "cuisine": "mexican",
+    "dietary": ["gluten-free"],
+    "prepTimeMinutes": 15,
+    "cookTimeMinutes": 50,
+    "servings": 4,
+    "description": "A fiery, slow-simmered chicken stew with chipotle, roasted tomatoes, and a hint of smoked paprika.",
+    "ingredients": [
+      { "name": "chicken thighs", "amount": "600", "unit": "g" },
+      { "name": "chipotle peppers", "amount": "2", "unit": "pieces" },
+      { "name": "smoked paprika", "amount": "1", "unit": "tsp" }
+    ],
+    "steps": ["Brown the chicken", "Simmer with chipotle and tomatoes for 45 minutes", "Finish with smoked paprika"]
+  }
+}
+
+assert {
+  res.status: eq 200
+  res.body.message: eq Recipe updated
+}

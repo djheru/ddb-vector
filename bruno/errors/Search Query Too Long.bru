@@ -1,0 +1,25 @@
+meta {
+  name: Search Query Too Long
+  type: http
+  seq: 4
+}
+
+post {
+  url: {{baseUrl}}/recipes/search
+  body: json
+  auth: none
+}
+
+body:json {
+  {
+    "query": "{{longQuery}}"
+  }
+}
+
+assert {
+  res.status: eq 400
+}
+
+script:pre-request {
+  bru.setVar("longQuery", "x".repeat(2000));
+}

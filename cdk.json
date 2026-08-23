@@ -1,0 +1,8 @@
+{
+  "app": "npx tsx bin/app.ts",
+  "context": {
+    "codestarConnectionArn": "arn:aws:codeconnections:REPLACE-REGION:REPLACE-ACCOUNT:connection/REPLACE-WITH-CONNECTION-ID",
+    "repository": "REPLACE-OWNER/recipe-catalog-cdk",
+    "@aws-cdk/aws-codepipeline:defaultPipelineTypeToV2": true
+  }
+}

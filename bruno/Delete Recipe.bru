@@ -1,0 +1,16 @@
+meta {
+  name: Delete Recipe
+  type: http
+  seq: 6
+}
+
+delete {
+  url: {{baseUrl}}/recipes/{{recipeId}}
+  body: none
+  auth: none
+}
+
+assert {
+  res.status: eq 200
+  res.body.message: eq Recipe deleted
+}
