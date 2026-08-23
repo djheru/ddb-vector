@@ -1,8 +1,8 @@
 {
   "app": "npx tsx bin/app.ts",
   "context": {
-    "codestarConnectionArn": "arn:aws:codeconnections:REPLACE-REGION:REPLACE-ACCOUNT:connection/REPLACE-WITH-CONNECTION-ID",
-    "repository": "REPLACE-OWNER/recipe-catalog-cdk",
+    "codestarConnectionArn": "arn:aws:codestar-connections:us-east-1:190423078218:connection/d2ef6035-0cee-439b-8e17-6898383bb302",
+    "repository": "djheru/ddb-vector",
     "@aws-cdk/aws-codepipeline:defaultPipelineTypeToV2": true
   }
 }
