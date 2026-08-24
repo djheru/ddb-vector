@@ -74,6 +74,26 @@ describe("pipeline stack", () => {
     expect(projects).toContain("get-api-key");
   });
 
+  it("selects the Node 24 runtime in every CodeBuild project", () => {
+    const projects = template.findResources("AWS::CodeBuild::Project") as Record<
+      string,
+      { Properties?: { Source?: { BuildSpec?: unknown } } }
+    >;
+    const entries = Object.entries(projects);
+    expect(entries.length).toBeGreaterThanOrEqual(3);
+    for (const [id, project] of entries) {
+      const spec = JSON.stringify(project.Properties?.Source?.BuildSpec ?? "");
+      // The AL2023 image defaults to Node 18 without this selection, which is
+      // too old for the repo's toolchain.
+      expect(spec, `project ${id} does not select nodejs 24`).toContain(
+        "runtime-versions",
+      );
+      expect(spec, `project ${id} does not select nodejs 24`).toMatch(
+        /nodejs\\?": 24/,
+      );
+    }
+  });
+
   it("grants ValidateDev apigateway:GET on api keys only", () => {
     const policies = JSON.stringify(template.findResources("AWS::IAM::Policy"));
     expect(policies).toContain("apigateway:GET");

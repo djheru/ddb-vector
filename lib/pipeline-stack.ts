@@ -1,6 +1,6 @@
 import type { StackProps } from "aws-cdk-lib";
 import { Stack } from "aws-cdk-lib";
-import { LinuxBuildImage } from "aws-cdk-lib/aws-codebuild";
+import { BuildSpec, LinuxBuildImage } from "aws-cdk-lib/aws-codebuild";
 import { PolicyStatement } from "aws-cdk-lib/aws-iam";
 import {
   CodeBuildStep,
@@ -55,9 +55,15 @@ export class PipelineStack extends Stack {
       // Single account, single region; avoids the KMS key cost.
       crossAccountKeys: false,
       codeBuildDefaults: {
-        // The library default image (standard:7.0) tops out at Node 18; the
-        // AL2023 image ships the modern Node this repo's tooling needs.
         buildEnvironment: { buildImage: LinuxBuildImage.AMAZON_LINUX_2023_5 },
+        // The AL2023 image defaults to Node 18 when no runtime is selected,
+        // which is too old for this toolchain (vitest 4 needs util.styleText,
+        // Node >= 20.12). Selecting nodejs 24 makes the image install it via
+        // its bundled n tool, matching the Lambda runtime and engines field.
+        partialBuildSpec: BuildSpec.fromObject({
+          version: "0.2",
+          phases: { install: { "runtime-versions": { nodejs: 24 } } },
+        }),
       },
     });
 
