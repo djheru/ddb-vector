@@ -94,6 +94,19 @@ describe("pipeline stack", () => {
     }
   });
 
+  it("runs every CodeBuild project on the AL2023 host kernel", () => {
+    const projects = template.findResources("AWS::CodeBuild::Project") as Record<
+      string,
+      { Properties?: { Environment?: { HostKernel?: string } } }
+    >;
+    for (const [id, project] of Object.entries(projects)) {
+      expect(
+        project.Properties?.Environment?.HostKernel,
+        `project ${id} is not on the AL2023 host kernel`,
+      ).toBe("LINUX_KERNEL_6");
+    }
+  });
+
   it("grants ValidateDev apigateway:GET on api keys only", () => {
     const policies = JSON.stringify(template.findResources("AWS::IAM::Policy"));
     expect(policies).toContain("apigateway:GET");

@@ -1,6 +1,6 @@
 import type { StackProps } from "aws-cdk-lib";
 import { Stack } from "aws-cdk-lib";
-import { BuildSpec, LinuxBuildImage } from "aws-cdk-lib/aws-codebuild";
+import { BuildSpec, CfnProject, LinuxBuildImage } from "aws-cdk-lib/aws-codebuild";
 import { PolicyStatement } from "aws-cdk-lib/aws-iam";
 import {
   CodeBuildStep,
@@ -98,5 +98,16 @@ export class PipelineStack extends Stack {
     pipeline.addStage(new AppStage(this, "Prod", { stage: "prod", env }), {
       pre: [new ManualApprovalStep("PromoteToProd")],
     });
+
+    // On-demand CodeBuild still defaults to an Amazon Linux 2 host (kernel
+    // 4.x); LINUX_KERNEL_6 selects the recommended AL2023 host. The host OS is
+    // independent of the container image above, and the L2 construct does not
+    // expose the setting yet, so apply it as an L1 override on every project.
+    pipeline.buildPipeline();
+    for (const project of this.node
+      .findAll()
+      .filter((node): node is CfnProject => node instanceof CfnProject)) {
+      project.addPropertyOverride("Environment.HostKernel", "LINUX_KERNEL_6");
+    }
   }
 }
