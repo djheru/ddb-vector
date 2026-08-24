@@ -87,7 +87,15 @@ export class PipelineStack extends Stack {
         "npx tsx scripts/smoke.ts",
         `python3 -m pip install --user "schemathesis==${SCHEMATHESIS_VERSION}" || python3 -m pip install --user --break-system-packages "schemathesis==${SCHEMATHESIS_VERSION}"`,
         'export PATH="$HOME/.local/bin:$PATH"',
-        `schemathesis run --checks all --base-url "$API_URL" -H "x-api-key: $API_KEY" --hypothesis-max-examples ${SCHEMATHESIS_MAX_EXAMPLES} openapi/openapi.yaml`,
+        // ignored_auth is excluded: in this Schemathesis version it accepts
+        // only 401 as proof of enforcement, but API Gateway rejects missing
+        // API keys with 403 by design, producing false positives. smoke.ts
+        // asserts the no-key 403 deterministically instead.
+        // generation-allow-x00 false: NUL bytes in paths are rejected by the
+        // CloudFront edge with an HTML error page before reaching the API,
+        // which no JSON contract can describe. contrib-openapi-formats-uuid:
+        // honor format uuid when generating the recipeId path parameter.
+        `schemathesis run --checks all --exclude-checks ignored_auth --generation-allow-x00 false --contrib-openapi-formats-uuid --base-url "$API_URL" -H "x-api-key: $API_KEY" --hypothesis-max-examples ${SCHEMATHESIS_MAX_EXAMPLES} openapi/openapi.yaml`,
       ],
       rolePolicyStatements: [
         new PolicyStatement({

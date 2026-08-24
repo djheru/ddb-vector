@@ -70,6 +70,7 @@ describe("pipeline stack", () => {
       template.findResources("AWS::CodeBuild::Project"),
     );
     expect(projects).toContain("schemathesis==3.39.16");
+    expect(projects).toContain("--exclude-checks ignored_auth");
     expect(projects).toContain("scripts/smoke.ts");
     expect(projects).toContain("get-api-key");
   });

@@ -230,6 +230,8 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/MessageResponse'
+        '400':
+          $ref: '#/components/responses/badRequest'
         '403':
           $ref: '#/components/responses/forbidden'
         '404':

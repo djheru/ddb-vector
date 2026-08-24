@@ -96,6 +96,17 @@ const main = async (): Promise<void> => {
     check(!("embedding" in fetched.body), "get response has no embedding field");
     check(fetched.body.name === smokeRecipe.name, "get returns the stored name");
 
+    // 2b. Requests without the API key are rejected by the gateway. Checked
+    // here deterministically because the pinned Schemathesis version cannot:
+    // its ignored_auth check accepts only 401, while API Gateway rejects
+    // missing keys with 403 by design.
+    const noKeyResponse = await fetch(`${apiUrl}/recipes/${recipeId}`, { method: "GET" });
+    await noKeyResponse.text();
+    check(
+      noKeyResponse.status === 403,
+      `request without api key returns 403 (got ${noKeyResponse.status})`,
+    );
+
     // 3. Search with a paraphrase sharing no keywords with the recipe text.
     const search = await request("POST", "/recipes/search", {
       query: "hot and hearty poultry dish",
