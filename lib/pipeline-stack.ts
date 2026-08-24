@@ -75,10 +75,15 @@ export class PipelineStack extends Stack {
       envFromCfnOutputs: { API_URL: dev.apiUrl, API_KEY_ID: dev.apiKeyId },
       commands: [
         // The VectorIndex custom resource blocks the Dev deployment until the
-        // vector index is ACTIVE, so this step needs no waits, sleeps, or
-        // readiness polling. Do not add any.
+        // vector index is ACTIVE, so this step needs no index-readiness
+        // polling. Do not add any.
         'export API_KEY=$(aws apigateway get-api-key --api-key "$API_KEY_ID" --include-value --query value --output text)',
         "npm ci",
+        // One exception, scoped to first deploys of a fresh stack: a brand-new
+        // API key can take a while to reach the API Gateway data plane, and
+        // CloudFormation has no way to wait on that. Poll a cheap authenticated
+        // endpoint until it stops returning 403 (up to ~90s), then hand off.
+        `for i in $(seq 1 30); do [ "$(curl -s -o /dev/null -w '%{http_code}' -H "x-api-key: $API_KEY" "\${API_URL}recipes/00000000-0000-4000-8000-000000000000")" != "403" ] && break; echo "waiting for API key propagation ($i)"; sleep 3; done`,
         "npx tsx scripts/smoke.ts",
         `python3 -m pip install --user "schemathesis==${SCHEMATHESIS_VERSION}" || python3 -m pip install --user --break-system-packages "schemathesis==${SCHEMATHESIS_VERSION}"`,
         'export PATH="$HOME/.local/bin:$PATH"',
