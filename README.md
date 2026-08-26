@@ -27,13 +27,20 @@ until the index is `ACTIVE`.
 - **A CodeConnections GitHub connection** (one-time, manual): console >
   Developer Tools > Settings > Connections > create, authorize the GitHub app,
   copy the ARN into `cdk.json` under `codestarConnectionArn`. Also set
-  `repository` in `cdk.json` to your `<owner>/recipe-catalog-cdk` fork.
+  `repository` in `cdk.json` to your own `<owner>/<repo>` fork.
+
+  **The committed `cdk.json` values are this repo's originals and will not
+  work for you.** A connection ARN is tied to the account that created it,
+  so you must replace both `codestarConnectionArn` and `repository` with
+  your own values before deploying the pipeline. (Sandbox deploys never
+  exercise the connection, so they work before you've set this up - but the
+  context keys must stay present, because synth fails without them.)
 
 ## Delivery pipeline
 
 Every push to `main` runs:
 
-```
+```text
 Synth (npm ci, npm test, cdk synth)  ->  Dev deploy  ->  ValidateDev  ->  manual approval  ->  Prod
 ```
 
