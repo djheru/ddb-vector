@@ -29,6 +29,53 @@ x-amazon-apigateway-gateway-responses:
 
 paths:
   /recipes:
+    get:
+      summary: List recipes
+      operationId: listRecipes
+      description: >-
+        Returns a cursor-paginated list of recipes ordered by name. Pass the
+        nextCursor value from a response as the cursor parameter to fetch the
+        following page. Stored embedding vectors are never returned.
+      tags:
+        - Recipe
+      security:
+        - ApiKeyAuth: []
+      parameters:
+        - name: pageSize
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 50
+          description: Number of recipes per page. Defaults to 20; values outside 1-50 are rejected.
+        - name: cursor
+          in: query
+          required: false
+          schema:
+            type: string
+            minLength: 1
+            maxLength: 2048
+          description: Opaque pagination cursor from a previous response.
+      responses:
+        '200':
+          description: One page of recipes
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ListRecipesResponse'
+        '400':
+          $ref: '#/components/responses/badRequest'
+        '403':
+          $ref: '#/components/responses/forbidden'
+        '500':
+          $ref: '#/components/responses/unexpectedError'
+      x-amazon-apigateway-request-validator: Validate body, query string parameters, and headers
+      x-amazon-apigateway-integration:
+        uri: 'arn:${Partition}:apigateway:${Region}:lambda:path/2015-03-31/functions/${ListRecipesFunctionArn}/invocations'
+        httpMethod: POST
+        type: aws_proxy
+
     post:
       summary: Create a recipe
       operationId: createRecipe
@@ -503,7 +550,15 @@ components:
           type: integer
           minimum: 1
           maximum: 25
-          description: Maximum number of results to return. Defaults to 5.
+          description: Number of results per page. Defaults to 5.
+        cursor:
+          type: string
+          minLength: 1
+          maxLength: 2048
+          description: >-
+            Opaque pagination cursor from a previous response for the same
+            query and cuisine. A cursor issued for a different query is
+            rejected with 400.
 
     SearchResult:
       type: object
@@ -558,6 +613,22 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/SearchResult'
+        nextCursor:
+          type: string
+          description: Present when more results exist; pass it back as cursor to fetch the next page.
+
+    ListRecipesResponse:
+      type: object
+      required:
+        - items
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/Recipe'
+        nextCursor:
+          type: string
+          description: Present when more recipes exist; pass it back as cursor to fetch the next page.
 
     ErrorResponse:
       type: object

@@ -1,0 +1,15 @@
+meta {
+  name: List Invalid Cursor
+  type: http
+  seq: 6
+}
+
+get {
+  url: {{baseUrl}}/recipes?cursor=not-a-valid-cursor
+  body: none
+  auth: none
+}
+
+assert {
+  res.status: eq 400
+}

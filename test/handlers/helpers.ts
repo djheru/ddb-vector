@@ -5,12 +5,14 @@ import type { RecipeInput } from "../../functions/shared/types";
 
 export const TEST_TABLE_NAME = "TestRecipes";
 export const TEST_INDEX_NAME = "RecipeEmbeddingIndex";
+export const TEST_LIST_INDEX_NAME = "RecipeListIndex";
 export const TEST_MODEL_ID = "amazon.titan-embed-text-v2:0";
 
 export const setHandlerEnv = (): void => {
   process.env.TABLE_NAME = TEST_TABLE_NAME;
   process.env.EMBEDDING_MODEL_ID = TEST_MODEL_ID;
   process.env.VECTOR_INDEX_NAME = TEST_INDEX_NAME;
+  process.env.LIST_INDEX_NAME = TEST_LIST_INDEX_NAME;
   process.env.SIMILARITY_THRESHOLD = "0.3";
 };
 
@@ -27,6 +29,7 @@ export const apiEvent = (input: {
   body?: unknown;
   rawBody?: string;
   pathParameters?: Record<string, string>;
+  queryStringParameters?: Record<string, string>;
 }): APIGatewayProxyEvent =>
   ({
     body:
@@ -36,6 +39,7 @@ export const apiEvent = (input: {
           ? JSON.stringify(input.body)
           : null,
     pathParameters: input.pathParameters ?? null,
+    queryStringParameters: input.queryStringParameters ?? null,
   }) as unknown as APIGatewayProxyEvent;
 
 export const validRecipe: RecipeInput = {

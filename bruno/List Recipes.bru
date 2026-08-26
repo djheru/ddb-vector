@@ -1,0 +1,34 @@
+meta {
+  name: List Recipes
+  type: http
+  seq: 7
+}
+
+get {
+  url: {{baseUrl}}/recipes?pageSize=5
+  body: none
+  auth: none
+}
+
+assert {
+  res.status: eq 200
+}
+
+tests {
+  test("items is an array", function () {
+    expect(res.getBody().items).to.be.an("array");
+  });
+
+  test("items never include embeddings", function () {
+    res.getBody().items.forEach(function (item) {
+      expect(item.embedding).to.equal(undefined);
+    });
+  });
+
+  test("items are ordered by name", function () {
+    const items = res.getBody().items;
+    for (let i = 1; i < items.length; i++) {
+      expect(items[i - 1].name <= items[i].name).to.equal(true);
+    }
+  });
+}

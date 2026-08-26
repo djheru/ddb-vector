@@ -1,7 +1,12 @@
 import type { StackProps } from "aws-cdk-lib";
 import { CfnOutput, Duration, RemovalPolicy, Stack } from "aws-cdk-lib";
 import { ApiDefinition, Period, SpecRestApi } from "aws-cdk-lib/aws-apigateway";
-import { AttributeType, BillingMode, Table } from "aws-cdk-lib/aws-dynamodb";
+import {
+  AttributeType,
+  BillingMode,
+  ProjectionType,
+  Table,
+} from "aws-cdk-lib/aws-dynamodb";
 import { PolicyStatement, ServicePrincipal } from "aws-cdk-lib/aws-iam";
 import { Architecture, Runtime } from "aws-cdk-lib/aws-lambda";
 import { NodejsFunction } from "aws-cdk-lib/aws-lambda-nodejs";
@@ -25,6 +30,19 @@ export const DEFAULT_EMBEDDING_MODEL_ID = "amazon.titan-embed-text-v2:0";
 
 const VECTOR_INDEX_NAME = "RecipeEmbeddingIndex";
 const VECTOR_ATTRIBUTE_NAME = "embedding";
+const LIST_INDEX_NAME = "RecipeListIndex";
+// Everything a list item needs except the embedding, which stays out of the
+// GSI so the heavy vectors are never duplicated into it.
+const LIST_INDEX_PROJECTED_ATTRIBUTES = [
+  "cuisine",
+  "description",
+  "dietary",
+  "prepTimeMinutes",
+  "cookTimeMinutes",
+  "servings",
+  "ingredients",
+  "steps",
+];
 // Calibrated to Titan Text Embeddings V2's compressed cosine range: measured
 // cross-vocabulary paraphrase matches score ~0.21-0.26 similarity, so 0.3
 // silently drops them; 0.15 keeps them while still cutting noise-level hits.
@@ -86,6 +104,17 @@ export class RecipecatalogStack extends Stack {
       pointInTimeRecoverySpecification: { pointInTimeRecoveryEnabled: isProd },
     });
 
+    // Sparse list index: every recipe carries entityType = "RECIPE", giving a
+    // scan-free, name-ordered listing. Items written before this index existed
+    // lack the attribute and stay invisible to the list until re-written.
+    table.addGlobalSecondaryIndex({
+      indexName: LIST_INDEX_NAME,
+      partitionKey: { name: "entityType", type: AttributeType.STRING },
+      sortKey: { name: "name", type: AttributeType.STRING },
+      projectionType: ProjectionType.INCLUDE,
+      nonKeyAttributes: LIST_INDEX_PROJECTED_ATTRIBUTES,
+    });
+
     const makeFunction = (
       id: string,
       dir: string,
@@ -144,6 +173,14 @@ export class RecipecatalogStack extends Stack {
         SIMILARITY_THRESHOLD: DEFAULT_SIMILARITY_THRESHOLD,
       },
     );
+    const listRecipesFunction = makeFunction(
+      "ListRecipesFunction",
+      "list-recipes",
+      {
+        TABLE_NAME: table.tableName,
+        LIST_INDEX_NAME,
+      },
+    );
 
     // Explicit least-privilege statements instead of the broad grant* bundles.
     // Note the empty account field: foundation models are account-less.
@@ -168,6 +205,12 @@ export class RecipecatalogStack extends Stack {
       [table.tableArn, `${table.tableArn}/index/*`],
     );
     grant(searchRecipesFunction, ["bedrock:InvokeModel"], [bedrockModelArn]);
+    // Query against a GSI authorizes on the index ARN, not the table ARN.
+    grant(
+      listRecipesFunction,
+      ["dynamodb:Query"],
+      [`${table.tableArn}/index/${LIST_INDEX_NAME}`],
+    );
 
     const vectorIndex = new VectorIndex(this, "RecipeEmbeddingIndex", {
       table,
@@ -194,6 +237,7 @@ export class RecipecatalogStack extends Stack {
         "${UpdateRecipeFunctionArn}": updateRecipeFunction.functionArn,
         "${DeleteRecipeFunctionArn}": deleteRecipeFunction.functionArn,
         "${SearchRecipesFunctionArn}": searchRecipesFunction.functionArn,
+        "${ListRecipesFunctionArn}": listRecipesFunction.functionArn,
       },
     );
 
@@ -213,6 +257,7 @@ export class RecipecatalogStack extends Stack {
       updateRecipeFunction,
       deleteRecipeFunction,
       searchRecipesFunction,
+      listRecipesFunction,
     ]) {
       fn.addPermission("ApiInvoke", {
         principal: new ServicePrincipal("apigateway.amazonaws.com"),

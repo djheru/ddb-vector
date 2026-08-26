@@ -170,7 +170,7 @@ describe("least privilege across all functions", () => {
         actionsOf([statement]).some((action) => action.startsWith("dynamodb:")),
       );
 
-    expect(dynamoStatements.length).toBeGreaterThanOrEqual(7);
+    expect(dynamoStatements.length).toBeGreaterThanOrEqual(8);
     for (const statement of dynamoStatements) {
       const resourceJson = JSON.stringify(statement.Resource);
       expect(resourceJson).toContain(tableId);
@@ -181,6 +181,7 @@ describe("least privilege across all functions", () => {
   it("write-path functions carry only their single table action", () => {
     for (const [envMarker, expected] of [
       ["VECTOR_INDEX_NAME", "dynamodb:SearchVectors"],
+      ["LIST_INDEX_NAME", "dynamodb:Query"],
     ] as const) {
       const roleId = findFunctionRoleByEnvVar(dev.template, envMarker);
       const dynamoActions = actionsOf(
@@ -250,6 +251,7 @@ describe("API", () => {
       "${UpdateRecipeFunctionArn}",
       "${DeleteRecipeFunctionArn}",
       "${SearchRecipesFunctionArn}",
+      "${ListRecipesFunctionArn}",
       "${Region}",
       "${Partition}",
     ]) {
@@ -272,7 +274,7 @@ describe("API", () => {
         .filter(([method]) => ["get", "post", "put", "delete"].includes(method))
         .map(([, operation]) => operation),
     );
-    expect(operations.length).toBe(5);
+    expect(operations.length).toBe(6);
     for (const operation of operations) {
       expect(operation.security).toEqual([{ ApiKeyAuth: [] }]);
     }
@@ -301,7 +303,7 @@ describe("API", () => {
     dev.template.resourceCountIs("AWS::ApiGateway::UsagePlanKey", 1);
   });
 
-  it("grants apigateway invoke permission on all five functions", () => {
+  it("grants apigateway invoke permission on all six functions", () => {
     const permissions = dev.template.findResources(
       "AWS::Lambda::Permission",
     ) as Record<string, { Properties?: { Principal?: string } }>;
@@ -309,7 +311,43 @@ describe("API", () => {
       (permission) =>
         permission.Properties?.Principal === "apigateway.amazonaws.com",
     );
-    expect(apiPermissions).toHaveLength(5);
+    expect(apiPermissions).toHaveLength(6);
+  });
+});
+
+describe("list GSI and list function", () => {
+  it("defines the sparse name-ordered list index without projecting embeddings", () => {
+    dev.template.hasResourceProperties("AWS::DynamoDB::Table", {
+      GlobalSecondaryIndexes: Match.arrayWith([
+        Match.objectLike({
+          IndexName: "RecipeListIndex",
+          KeySchema: [
+            { AttributeName: "entityType", KeyType: "HASH" },
+            { AttributeName: "name", KeyType: "RANGE" },
+          ],
+          Projection: Match.objectLike({
+            ProjectionType: "INCLUDE",
+            NonKeyAttributes: Match.arrayWith(["cuisine", "ingredients", "steps"]),
+          }),
+        }),
+      ]),
+    });
+    const tables = dev.template.findResources("AWS::DynamoDB::Table");
+    expect(JSON.stringify(tables)).not.toContain('"embedding"');
+  });
+
+  it("grants the list function exactly dynamodb:Query on the list index", () => {
+    const roleId = findFunctionRoleByEnvVar(dev.template, "LIST_INDEX_NAME");
+    const statements = statementsForRole(dev.template, roleId);
+    const dynamoActions = actionsOf(statements).filter((action) =>
+      action.startsWith("dynamodb:"),
+    );
+    expect(dynamoActions).toEqual(["dynamodb:Query"]);
+
+    const queryStatement = statements.find((statement) =>
+      actionsOf([statement]).includes("dynamodb:Query"),
+    );
+    expect(JSON.stringify(queryStatement?.Resource)).toContain("/index/RecipeListIndex");
   });
 });
 

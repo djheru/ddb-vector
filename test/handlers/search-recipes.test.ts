@@ -11,6 +11,7 @@ const bedrockMock = mockClient(BedrockRuntimeClient);
 interface SearchResponseBody {
   query: string;
   cuisine?: string;
+  nextCursor?: string;
   results: {
     recipeId: string;
     name: string;
@@ -22,6 +23,17 @@ interface SearchResponseBody {
 
 const parseSearchBody = (body: string): SearchResponseBody =>
   JSON.parse(body) as SearchResponseBody;
+
+/** Pool of results with strictly ascending scores, so ordering is deterministic. */
+const pool = (size: number) =>
+  Array.from({ length: size }, (_, index) => ({
+    Item: storedItem(
+      `650e8400-e29b-41d4-a716-4466554400${String(index).padStart(2, "0")}`,
+      `Recipe ${index}`,
+      "mexican",
+    ),
+    Score: 0.1 + index * 0.05,
+  }));
 
 beforeEach(() => {
   ddbMock.reset();
@@ -61,25 +73,95 @@ describe("search-recipes handler", () => {
     expect(body.results[0]!.name).toBe("Close Match");
   });
 
-  it("clamps topK to 25 when a larger value is requested", async () => {
-    ddbMock.on(SearchVectorsCommand).resolves({ SearchResults: [] });
-
-    await handler(apiEvent({ body: { query: "stew", topK: 100 } }));
-
-    const calls = ddbMock.commandCalls(SearchVectorsCommand);
-    expect(calls).toHaveLength(1);
-    expect(calls[0]!.args[0].input.TopK).toBe(25);
-  });
-
-  it("defaults topK to 5 and clamps a low value up to 1", async () => {
+  it("always requests the engine's full candidate pool; topK is the page size", async () => {
     ddbMock.on(SearchVectorsCommand).resolves({ SearchResults: [] });
 
     await handler(apiEvent({ body: { query: "stew" } }));
-    await handler(apiEvent({ body: { query: "stew", topK: 0 } }));
+    await handler(apiEvent({ body: { query: "stew", topK: 3 } }));
+    await handler(apiEvent({ body: { query: "stew", topK: 100 } }));
 
-    const calls = ddbMock.commandCalls(SearchVectorsCommand);
-    expect(calls[0]!.args[0].input.TopK).toBe(5);
-    expect(calls[1]!.args[0].input.TopK).toBe(1);
+    for (const call of ddbMock.commandCalls(SearchVectorsCommand)) {
+      expect(call.args[0].input.TopK).toBe(100);
+    }
+  });
+
+  it("slices the pool to the clamped page size and reports nextCursor when more remain", async () => {
+    ddbMock.on(SearchVectorsCommand).resolves({ SearchResults: pool(8) });
+
+    const small = parseSearchBody(
+      (await handler(apiEvent({ body: { query: "stew", topK: 3 } }))).body,
+    );
+    expect(small.results).toHaveLength(3);
+    expect(small.nextCursor).toBeDefined();
+
+    const wholePool = parseSearchBody(
+      (await handler(apiEvent({ body: { query: "stew", topK: 8 } }))).body,
+    );
+    expect(wholePool.results).toHaveLength(8);
+    expect(wholePool.nextCursor).toBeUndefined();
+
+    const clampedLow = parseSearchBody(
+      (await handler(apiEvent({ body: { query: "stew", topK: 0 } }))).body,
+    );
+    expect(clampedLow.results).toHaveLength(1);
+  });
+
+  it("pages through the pool with the returned cursor", async () => {
+    ddbMock.on(SearchVectorsCommand).resolves({ SearchResults: pool(5) });
+
+    const first = parseSearchBody(
+      (await handler(apiEvent({ body: { query: "stew", topK: 2 } }))).body,
+    );
+    expect(first.results.map((result) => result.name)).toEqual(["Recipe 0", "Recipe 1"]);
+    expect(first.nextCursor).toBeDefined();
+
+    const second = parseSearchBody(
+      (
+        await handler(
+          apiEvent({ body: { query: "stew", topK: 2, cursor: first.nextCursor } }),
+        )
+      ).body,
+    );
+    expect(second.results.map((result) => result.name)).toEqual(["Recipe 2", "Recipe 3"]);
+    expect(second.nextCursor).toBeDefined();
+
+    const third = parseSearchBody(
+      (
+        await handler(
+          apiEvent({ body: { query: "stew", topK: 2, cursor: second.nextCursor } }),
+        )
+      ).body,
+    );
+    expect(third.results.map((result) => result.name)).toEqual(["Recipe 4"]);
+    expect(third.nextCursor).toBeUndefined();
+  });
+
+  it("rejects a cursor issued for a different query or filter", async () => {
+    ddbMock.on(SearchVectorsCommand).resolves({ SearchResults: pool(5) });
+
+    const first = parseSearchBody(
+      (await handler(apiEvent({ body: { query: "stew", topK: 2 } }))).body,
+    );
+
+    const differentQuery = await handler(
+      apiEvent({ body: { query: "salad", topK: 2, cursor: first.nextCursor } }),
+    );
+    expect(differentQuery.statusCode).toBe(400);
+
+    const differentFilter = await handler(
+      apiEvent({
+        body: { query: "stew", cuisine: "mexican", topK: 2, cursor: first.nextCursor },
+      }),
+    );
+    expect(differentFilter.statusCode).toBe(400);
+  });
+
+  it("rejects malformed cursors with 400 before calling Bedrock", async () => {
+    const response = await handler(
+      apiEvent({ body: { query: "stew", cursor: "!!!garbage!!!" } }),
+    );
+    expect(response.statusCode).toBe(400);
+    expect(bedrockMock.commandCalls(InvokeModelCommand)).toHaveLength(0);
   });
 
   it("sends SearchConditionExpression only when cuisine is provided", async () => {

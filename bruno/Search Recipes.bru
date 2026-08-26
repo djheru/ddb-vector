@@ -12,7 +12,7 @@ post {
 
 body:json {
   {
-    "query": "hot and hearty poultry dish"
+    "query": "spicy mexican chicken stew fiery chipotle"
   }
 }
 
@@ -24,7 +24,7 @@ tests {
   test("results is an array", function () {
     expect(res.getBody().results).to.be.an("array");
   });
-
+  
   test("results are sorted by similarity descending", function () {
     const results = res.getBody().results;
     for (let i = 1; i < results.length; i++) {

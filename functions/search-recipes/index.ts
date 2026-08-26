@@ -12,12 +12,20 @@ import {
   requireEnv,
 } from "../shared/http";
 import {
+  decodeCursor,
+  encodeCursor,
+  isSearchCursor,
+  searchFingerprint,
+} from "../shared/pagination";
+import {
   CUISINE_MAX_LENGTH,
   CUISINE_MIN_LENGTH,
   CUISINE_PATTERN,
+  CURSOR_MAX_LENGTH,
   isRecord,
   QUERY_MAX_LENGTH,
   QUERY_MIN_LENGTH,
+  SEARCH_CANDIDATE_POOL_SIZE,
   TOP_K_DEFAULT,
   TOP_K_MAX,
   TOP_K_MIN,
@@ -49,7 +57,7 @@ export const handler = async (event: APIGatewayProxyEvent): Promise<APIGatewayPr
     const parsed = parseJsonBody(event.body);
     if (!isRecord(parsed)) return badRequest("Request body must be a JSON object");
 
-    const { query, cuisine, topK } = parsed;
+    const { query, cuisine, topK, cursor } = parsed;
     if (
       typeof query !== "string" ||
       query.length < QUERY_MIN_LENGTH ||
@@ -73,6 +81,23 @@ export const handler = async (event: APIGatewayProxyEvent): Promise<APIGatewayPr
     }
     const clampedTopK = Math.min(TOP_K_MAX, Math.max(TOP_K_MIN, topK ?? TOP_K_DEFAULT));
 
+    // The engine has no native pagination: every request fetches the full
+    // candidate pool (engine cap) and slices it at a cursor offset. The cursor
+    // carries a fingerprint binding it to this exact query and filter.
+    const fingerprint = searchFingerprint(query, cuisine);
+    let offset = 0;
+    if (cursor !== undefined) {
+      if (typeof cursor !== "string" || cursor.length > CURSOR_MAX_LENGTH) {
+        return badRequest("cursor is not valid");
+      }
+      const decoded = decodeCursor(cursor);
+      if (!isSearchCursor(decoded)) return badRequest("cursor is not valid");
+      if (decoded.fingerprint !== fingerprint) {
+        return badRequest("cursor does not match this query");
+      }
+      offset = decoded.offset;
+    }
+
     // Same model and dimensions as write time; this invariant is what makes
     // the search meaningful.
     const queryVector = await generateEmbedding(query);
@@ -82,7 +107,7 @@ export const handler = async (event: APIGatewayProxyEvent): Promise<APIGatewayPr
         TableName: requireEnv("TABLE_NAME"),
         IndexName: requireEnv("VECTOR_INDEX_NAME"),
         SearchVector: queryVector.map((component) => ({ N: String(component) })),
-        TopK: clampedTopK,
+        TopK: SEARCH_CANDIDATE_POOL_SIZE,
         ...(cuisine !== undefined && {
           SearchConditionExpression: "cuisine = :cuisine",
           ExpressionAttributeValues: { ":cuisine": { S: cuisine } },
@@ -91,7 +116,7 @@ export const handler = async (event: APIGatewayProxyEvent): Promise<APIGatewayPr
     );
 
     const threshold = Number(process.env.SIMILARITY_THRESHOLD ?? DEFAULT_SIMILARITY_THRESHOLD);
-    const results = (response.SearchResults ?? [])
+    const pool = (response.SearchResults ?? [])
       .flatMap((result): SearchResultShape[] => {
         if (!result.Item || typeof result.Score !== "number") return [];
         const item = unmarshall(result.Item);
@@ -116,16 +141,23 @@ export const handler = async (event: APIGatewayProxyEvent): Promise<APIGatewayPr
       .filter((result) => result.similarity >= threshold)
       .sort((a, b) => b.similarity - a.similarity);
 
+    const results = pool.slice(offset, offset + clampedTopK);
+    const nextOffset = offset + clampedTopK;
+    const hasMore = pool.length > nextOffset;
+
     logInfo("search complete", {
       query,
       cuisine,
       topK: clampedTopK,
+      offset,
+      poolSize: pool.length,
       resultCount: results.length,
     });
     return jsonResponse(200, {
       query,
       ...(cuisine !== undefined && { cuisine }),
       results,
+      ...(hasMore && { nextCursor: encodeCursor({ offset: nextOffset, fingerprint }) }),
     });
   } catch (error) {
     if (isEmbeddingValidationError(error)) {

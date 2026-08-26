@@ -426,7 +426,7 @@ Cover: prerequisites (Node 24, CDK bootstrap, Bedrock model access enabled for T
 
 ## 15. Non-goals
 
-No frontend, no CORS, no pagination of search results, no vector index partition key (single-tenant demo scale; document in the README that high-volume multi-tenant usage would add one — noting it scopes each search call and is a scale mechanism, not access control), no DynamoDB Streams / async embedding path, no custom domain, no multi-region, no multi-account pipeline, no per-pull-request ephemeral environments (see 12.4).
+No frontend, no CORS, no vector index partition key (single-tenant demo scale; document in the README that high-volume multi-tenant usage would add one — noting it scopes each search call and is a scale mechanism, not access control), no DynamoDB Streams / async embedding path, no custom domain, no multi-region, no multi-account pipeline, no per-pull-request ephemeral environments (see 12.4).
 
 ## 16. Acceptance criteria
 
@@ -445,3 +445,11 @@ No frontend, no CORS, no pagination of search results, no vector index partition
 13. Changing `dimensions` in the `VectorIndex` props without renaming the index fails deployment with the explicit immutability error; renaming the index deploys a replacement successfully.
 14. The Bruno collection opens in Bruno without errors; with a seeded Dev environment configured, running the six happy-path requests top to bottom passes every assert (including embedding absence on Get and result ordering on Search), and each request in `errors/` returns its expected status (400/404/400/403).
 15. `cdk destroy -c sandbox=<name>` tears a sandbox down cleanly with no orphaned resources.
+
+## 17. Addendum: listing and pagination (2026-08-24)
+
+Added after initial delivery, superseding the original "no pagination of search results" non-goal:
+
+- `GET /recipes` (list-recipes function) returns a cursor-paginated, name-ordered list backed by a sparse GSI `RecipeListIndex` (partition key `entityType` = `"RECIPE"`, sort key `name`, projection INCLUDE of all public attributes, never the embedding). IAM: exactly `dynamodb:Query` on the index ARN. Items written before the index existed lack `entityType` and stay invisible until re-written.
+- `POST /recipes/search` accepts an optional `cursor`; `topK` (1-25, default 5) is the page size. `SearchVectors` has no native pagination (`TopK` cap 100), so each page fetches the full 100-candidate pool and slices at the cursor offset. Cursors carry a fingerprint binding them to their exact query and cuisine; mismatches return 400. Paging beyond 100 candidates is not possible.
+- Cursors are opaque base64url JSON, validated structurally server-side. Gateway request validators do not check query-parameter ranges, so the list handler rejects out-of-contract `pageSize` with 400 rather than clamping.

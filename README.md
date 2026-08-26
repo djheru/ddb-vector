@@ -109,6 +109,24 @@ matches typically score in the 0.2-0.3 band, and only queries sharing
 vocabulary with the recipe text score much higher. Phrase-shaped queries
 ("hearty chicken dinner") work far better than single keywords ("poultry").
 
+## Listing and pagination
+
+`GET /recipes` returns a cursor-paginated list ordered by name, backed by a
+sparse GSI (`RecipeListIndex`) with a static partition key, so listing never
+scans the table. Pass `pageSize` (1-50, default 20) and the `nextCursor` value
+from a response as `cursor` to fetch the following page. Recipes written
+before this index existed lack its key attribute and stay invisible to the
+list until re-written (re-run the seeder if that matters to you).
+
+Search paginates too: `topK` (1-25, default 5) is the page size and responses
+include `nextCursor` while more matches remain. The vector engine has no
+native pagination, so each page re-runs the search over the engine's 100-result
+candidate pool and slices it; a cursor is bound to the exact query and cuisine
+it was issued for (using it with a different query returns 400), and paging
+beyond 100 candidates is not possible. Cursors are opaque and short-lived by
+nature; ordering across pages is best-effort if the underlying data changes
+mid-walk.
+
 ## Vector index immutability
 
 A vector index's configuration (dimensions, distance function, projection,

@@ -124,6 +124,29 @@ const main = async (): Promise<void> => {
     );
     check(sorted, "results are sorted by similarity descending");
 
+    // 3b. Search pagination: a one-result page plus a cursor walk whenever
+    // more matches exist in this environment.
+    const searchPageOne = await request("POST", "/recipes/search", {
+      query: "hot and hearty poultry dish",
+      topK: 1,
+    });
+    check(searchPageOne.status === 200, `paged search returns 200 (got ${searchPageOne.status})`);
+    const searchPageOneResults = (searchPageOne.body.results ?? []) as SearchResult[];
+    check(searchPageOneResults.length <= 1, "search honors topK=1 as the page size");
+    if (typeof searchPageOne.body.nextCursor === "string") {
+      const searchPageTwo = await request("POST", "/recipes/search", {
+        query: "hot and hearty poultry dish",
+        topK: 1,
+        cursor: searchPageOne.body.nextCursor,
+      });
+      check(searchPageTwo.status === 200, `search page 2 returns 200 (got ${searchPageTwo.status})`);
+      const searchPageTwoResults = (searchPageTwo.body.results ?? []) as SearchResult[];
+      check(
+        searchPageTwoResults[0]?.recipeId !== searchPageOneResults[0]?.recipeId,
+        "search page 2 starts after page 1",
+      );
+    }
+
     // 4. Search with the cuisine filter and assert only that cuisine returns.
     const filtered = await request("POST", "/recipes/search", {
       query: "something spicy",
@@ -136,6 +159,31 @@ const main = async (): Promise<void> => {
       filteredResults.every((result) => result.cuisine === "mexican"),
       "cuisine filter returns only mexican recipes",
     );
+
+    // 4b. List endpoint: page sizing, no embeddings, cursor walk, bad cursor.
+    const listPage = await request("GET", "/recipes?pageSize=1");
+    check(listPage.status === 200, `list returns 200 (got ${listPage.status})`);
+    const listItems = (listPage.body.items ?? []) as { recipeId?: string }[];
+    check(Array.isArray(listPage.body.items), "list returns an items array");
+    check(listItems.length === 1, "list honors pageSize=1");
+    check(
+      listItems.every((item) => !("embedding" in item)),
+      "list items have no embedding field",
+    );
+    if (typeof listPage.body.nextCursor === "string") {
+      const listPageTwo = await request(
+        "GET",
+        `/recipes?pageSize=1&cursor=${encodeURIComponent(listPage.body.nextCursor)}`,
+      );
+      check(listPageTwo.status === 200, `list page 2 returns 200 (got ${listPageTwo.status})`);
+      const listPageTwoItems = (listPageTwo.body.items ?? []) as { recipeId?: string }[];
+      check(
+        listPageTwoItems[0]?.recipeId !== listItems[0]?.recipeId,
+        "list page 2 starts after page 1",
+      );
+    }
+    const badCursor = await request("GET", "/recipes?cursor=not-a-valid-cursor");
+    check(badCursor.status === 400, `invalid list cursor returns 400 (got ${badCursor.status})`);
 
     // 5. Update it and assert 200.
     const updated = await request("PUT", `/recipes/${recipeId}`, {

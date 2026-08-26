@@ -41,6 +41,24 @@ export const QUERY_MAX_LENGTH = 1000;
 export const TOP_K_MIN = 1;
 export const TOP_K_MAX = 25;
 export const TOP_K_DEFAULT = 5;
+export const LIST_PAGE_SIZE_MIN = 1;
+export const LIST_PAGE_SIZE_MAX = 50;
+export const LIST_PAGE_SIZE_DEFAULT = 20;
+export const CURSOR_MAX_LENGTH = 2048;
+
+/**
+ * The engine caps TopK at 100 (spec ground truth 8). Search pagination fetches
+ * this full candidate pool once per request and slices it by cursor offset,
+ * because SearchVectors has no native pagination token.
+ */
+export const SEARCH_CANDIDATE_POOL_SIZE = 100;
+
+/**
+ * Static partition key value for the sparse list GSI: every recipe lands in
+ * one partition, sorted by name. A scale mechanism appropriate for demo-sized
+ * catalogs; large catalogs would shard this key.
+ */
+export const ENTITY_TYPE_RECIPE = "RECIPE";
 
 // Stored-item defaults for the optional numeric fields, matching the reference
 // implementation's item shape.
@@ -238,6 +256,7 @@ export const recipeToItem = (
   embedding: number[],
 ): Record<string, AttributeValue> => ({
   recipeId: { S: recipeId },
+  entityType: { S: ENTITY_TYPE_RECIPE },
   name: { S: recipe.name },
   cuisine: { S: recipe.cuisine },
   dietary: { L: (recipe.dietary ?? []).map((tag) => ({ S: tag })) },
