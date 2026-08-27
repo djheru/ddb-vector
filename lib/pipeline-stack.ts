@@ -89,6 +89,8 @@ export class PipelineStack extends Stack {
         'export API_KEY=$(aws apigateway get-api-key --api-key "$API_KEY_ID" --include-value --query value --output text)',
         // The AppSync api key id IS the key value (the da2-... string).
         'export GRAPHQL_API_KEY=$(aws appsync list-api-keys --api-id "$GRAPHQL_API_ID" --query "apiKeys[0].id" --output text)',
+        // Fail here, not three commands later in smoke, if the fetch failed.
+        '[ -n "$GRAPHQL_API_KEY" ] && [ "$GRAPHQL_API_KEY" != "None" ] || { echo "Failed to fetch the AppSync api key"; exit 1; }',
         "npm ci",
         // One exception: two API Gateway data-plane surfaces are eventually
         // consistent and CloudFormation cannot wait on either - a brand-new
@@ -118,11 +120,12 @@ export class PipelineStack extends Stack {
             `arn:${this.partition}:apigateway:${this.region}::/apikeys/*`,
           ],
         }),
+        // ListApiKeys supports no resource-level permissions (empty resource
+        // type in the service authorization reference), so this must be "*";
+        // an api-scoped ARN can never match and produces AccessDenied.
         new PolicyStatement({
           actions: ["appsync:ListApiKeys"],
-          resources: [
-            `arn:${this.partition}:appsync:${this.region}:${this.account}:apis/*`,
-          ],
+          resources: ["*"],
         }),
       ],
     });
