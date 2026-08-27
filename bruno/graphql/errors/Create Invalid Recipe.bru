@@ -1,0 +1,47 @@
+meta {
+  name: Create Invalid Recipe
+  type: graphql
+  seq: 2
+}
+
+post {
+  url: {{graphqlUrl}}
+  body: graphql
+  auth: none
+}
+
+headers {
+  x-api-key: {{graphqlApiKey}}
+}
+
+body:graphql {
+  mutation CreateRecipe($input: RecipeInput!) {
+    createRecipe(input: $input) {
+      recipeId
+      message
+    }
+  }
+}
+
+body:graphql:vars {
+  {
+    "input": {
+      "name": "Bad Recipe",
+      "cuisine": "mexican",
+      "description": "Short",
+      "ingredients": [{ "name": "salt", "amount": "1", "unit": "tsp" }],
+      "steps": ["Do nothing at all"]
+    }
+  }
+}
+
+assert {
+  res.status: eq 200
+  res.body.errors[0].errorType: eq ValidationError
+}
+
+tests {
+  test("validation message names the offending field", function () {
+    expect(res.getBody().errors[0].message).to.contain("description");
+  });
+}

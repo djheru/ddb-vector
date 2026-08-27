@@ -16,6 +16,8 @@ export interface AppStageProps extends StageProps {
 export class AppStage extends Stage {
   readonly apiUrl: CfnOutput;
   readonly apiKeyId: CfnOutput;
+  readonly graphqlUrl: CfnOutput;
+  readonly graphqlApiId: CfnOutput;
   readonly stack: RecipecatalogStack;
 
   constructor(scope: Construct, id: string, props: AppStageProps) {
@@ -25,5 +27,7 @@ export class AppStage extends Stage {
     });
     this.apiUrl = this.stack.apiUrl;
     this.apiKeyId = this.stack.apiKeyId;
+    this.graphqlUrl = this.stack.graphqlUrl;
+    this.graphqlApiId = this.stack.graphqlApiId;
   }
 }

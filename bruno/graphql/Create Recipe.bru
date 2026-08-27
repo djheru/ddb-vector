@@ -1,0 +1,54 @@
+meta {
+  name: Create Recipe
+  type: graphql
+  seq: 1
+}
+
+post {
+  url: {{graphqlUrl}}
+  body: graphql
+  auth: none
+}
+
+headers {
+  x-api-key: {{graphqlApiKey}}
+}
+
+body:graphql {
+  mutation CreateRecipe($input: RecipeInput!) {
+    createRecipe(input: $input) {
+      recipeId
+      message
+    }
+  }
+}
+
+body:graphql:vars {
+  {
+    "input": {
+      "name": "Spicy Chicken Stew",
+      "cuisine": "mexican",
+      "dietary": ["gluten-free"],
+      "prepTimeMinutes": 15,
+      "cookTimeMinutes": 45,
+      "servings": 4,
+      "description": "A fiery, slow-simmered chicken stew with chipotle and tomatoes.",
+      "ingredients": [
+        { "name": "chicken thighs", "amount": "600", "unit": "g" },
+        { "name": "chipotle peppers", "amount": "2", "unit": "pieces" }
+      ],
+      "steps": ["Brown the chicken thoroughly", "Simmer with chipotle and tomatoes for 45 minutes"]
+    }
+  }
+}
+
+assert {
+  res.status: eq 200
+  res.body.errors: isUndefined
+  res.body.data.createRecipe.recipeId: isDefined
+  res.body.data.createRecipe.message: eq Recipe created
+}
+
+script:post-response {
+  bru.setVar("gqlRecipeId", res.body.data.createRecipe.recipeId);
+}

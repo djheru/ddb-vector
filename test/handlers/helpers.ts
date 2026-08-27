@@ -1,6 +1,6 @@
 import type { InvokeModelCommandOutput } from "@aws-sdk/client-bedrock-runtime";
 import type { AttributeValue } from "@aws-sdk/client-dynamodb";
-import type { APIGatewayProxyEvent } from "aws-lambda";
+import type { APIGatewayProxyEvent, AppSyncResolverEvent } from "aws-lambda";
 import type { RecipeInput } from "../../functions/shared/types";
 
 export const TEST_TABLE_NAME = "TestRecipes";
@@ -41,6 +41,17 @@ export const apiEvent = (input: {
     pathParameters: input.pathParameters ?? null,
     queryStringParameters: input.queryStringParameters ?? null,
   }) as unknown as APIGatewayProxyEvent;
+
+/** Minimal AppSync resolver event: the lambdalith reads info + arguments. */
+export const appSyncEvent = (
+  parentTypeName: "Query" | "Mutation",
+  fieldName: string,
+  args: Record<string, unknown>,
+): AppSyncResolverEvent<Record<string, unknown>> =>
+  ({
+    arguments: args,
+    info: { parentTypeName, fieldName },
+  }) as unknown as AppSyncResolverEvent<Record<string, unknown>>;
 
 export const validRecipe: RecipeInput = {
   name: "Spicy Chicken Stew",

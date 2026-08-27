@@ -1,0 +1,51 @@
+meta {
+  name: Update Recipe
+  type: graphql
+  seq: 3
+}
+
+post {
+  url: {{graphqlUrl}}
+  body: graphql
+  auth: none
+}
+
+headers {
+  x-api-key: {{graphqlApiKey}}
+}
+
+body:graphql {
+  mutation UpdateRecipe($recipeId: ID!, $input: RecipeInput!) {
+    updateRecipe(recipeId: $recipeId, input: $input) {
+      recipeId
+      message
+    }
+  }
+}
+
+body:graphql:vars {
+  {
+    "recipeId": "{{gqlRecipeId}}",
+    "input": {
+      "name": "Spicy Chicken Stew",
+      "cuisine": "mexican",
+      "dietary": ["gluten-free"],
+      "prepTimeMinutes": 15,
+      "cookTimeMinutes": 50,
+      "servings": 4,
+      "description": "A fiery, slow-simmered chicken stew with chipotle, tomatoes, and smoked paprika.",
+      "ingredients": [
+        { "name": "chicken thighs", "amount": "600", "unit": "g" },
+        { "name": "chipotle peppers", "amount": "2", "unit": "pieces" },
+        { "name": "smoked paprika", "amount": "1", "unit": "tsp" }
+      ],
+      "steps": ["Brown the chicken thoroughly", "Simmer with chipotle and tomatoes for 50 minutes"]
+    }
+  }
+}
+
+assert {
+  res.status: eq 200
+  res.body.errors: isUndefined
+  res.body.data.updateRecipe.message: eq Recipe updated
+}

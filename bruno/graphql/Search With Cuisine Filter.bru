@@ -1,0 +1,51 @@
+meta {
+  name: Search With Cuisine Filter
+  type: graphql
+  seq: 5
+}
+
+post {
+  url: {{graphqlUrl}}
+  body: graphql
+  auth: none
+}
+
+headers {
+  x-api-key: {{graphqlApiKey}}
+}
+
+body:graphql {
+  query SearchRecipes($query: String!, $cuisine: String, $topK: Int) {
+    searchRecipes(query: $query, cuisine: $cuisine, topK: $topK) {
+      query
+      cuisine
+      results {
+        recipeId
+        name
+        cuisine
+        similarity
+      }
+    }
+  }
+}
+
+body:graphql:vars {
+  {
+    "query": "something spicy",
+    "cuisine": "mexican",
+    "topK": 3
+  }
+}
+
+assert {
+  res.status: eq 200
+  res.body.errors: isUndefined
+}
+
+tests {
+  test("every result matches the cuisine filter", function () {
+    res.getBody().data.searchRecipes.results.forEach(function (result) {
+      expect(result.cuisine).to.equal("mexican");
+    });
+  });
+}

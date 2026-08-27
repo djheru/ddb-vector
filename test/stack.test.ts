@@ -49,21 +49,31 @@ interface FunctionResource {
   };
 }
 
-const findFunctionRoleByEnvVar = (
+// Functions are identified by their env-var fingerprint. The lambdalith
+// carries the union (VECTOR_INDEX_NAME and LIST_INDEX_NAME), so single-purpose
+// functions are pinned by what they carry AND what they lack.
+const findFunctionRoleByEnvVars = (
   template: Template,
-  envKey: string,
+  has: string[],
+  lacks: string[] = [],
 ): string => {
   const functions = template.findResources("AWS::Lambda::Function") as Record<
     string,
     FunctionResource
   >;
-  const entry = Object.values(functions).find(
-    (fn) =>
-      fn.Properties?.Environment?.Variables &&
-      envKey in fn.Properties.Environment.Variables,
-  );
-  const role = entry?.Properties?.Role?.["Fn::GetAtt"]?.[0];
-  if (!role) throw new Error(`No function found carrying env var ${envKey}`);
+  const matches = Object.values(functions).filter((fn) => {
+    const variables = fn.Properties?.Environment?.Variables ?? {};
+    return (
+      has.every((key) => key in variables) && lacks.every((key) => !(key in variables))
+    );
+  });
+  if (matches.length !== 1) {
+    throw new Error(
+      `Expected exactly one function with env vars [${has.join(", ")}] minus [${lacks.join(", ")}], found ${matches.length}`,
+    );
+  }
+  const role = matches[0]?.Properties?.Role?.["Fn::GetAtt"]?.[0];
+  if (!role) throw new Error("Matched function has no role");
   return role;
 };
 
@@ -115,7 +125,11 @@ describe("DynamoDB table", () => {
 });
 
 describe("search function IAM policy", () => {
-  const roleId = findFunctionRoleByEnvVar(dev.template, "VECTOR_INDEX_NAME");
+  const roleId = findFunctionRoleByEnvVars(
+    dev.template,
+    ["VECTOR_INDEX_NAME"],
+    ["LIST_INDEX_NAME"],
+  );
   const statements = statementsForRole(dev.template, roleId);
   const actions = actionsOf(statements);
 
@@ -178,12 +192,12 @@ describe("least privilege across all functions", () => {
     }
   });
 
-  it("write-path functions carry only their single table action", () => {
-    for (const [envMarker, expected] of [
-      ["VECTOR_INDEX_NAME", "dynamodb:SearchVectors"],
-      ["LIST_INDEX_NAME", "dynamodb:Query"],
+  it("read-path functions carry only their single table action", () => {
+    for (const [envMarker, excluded, expected] of [
+      ["VECTOR_INDEX_NAME", "LIST_INDEX_NAME", "dynamodb:SearchVectors"],
+      ["LIST_INDEX_NAME", "VECTOR_INDEX_NAME", "dynamodb:Query"],
     ] as const) {
-      const roleId = findFunctionRoleByEnvVar(dev.template, envMarker);
+      const roleId = findFunctionRoleByEnvVars(dev.template, [envMarker], [excluded]);
       const dynamoActions = actionsOf(
         statementsForRole(dev.template, roleId),
       ).filter((action) => action.startsWith("dynamodb:"));
@@ -337,7 +351,11 @@ describe("list GSI and list function", () => {
   });
 
   it("grants the list function exactly dynamodb:Query on the list index", () => {
-    const roleId = findFunctionRoleByEnvVar(dev.template, "LIST_INDEX_NAME");
+    const roleId = findFunctionRoleByEnvVars(
+      dev.template,
+      ["LIST_INDEX_NAME"],
+      ["VECTOR_INDEX_NAME"],
+    );
     const statements = statementsForRole(dev.template, roleId);
     const dynamoActions = actionsOf(statements).filter((action) =>
       action.startsWith("dynamodb:"),
@@ -384,5 +402,62 @@ describe("stack outputs", () => {
   it("exposes the API URL and the API key id (never the value)", () => {
     dev.template.hasOutput("ApiUrl", {});
     dev.template.hasOutput("ApiKeyId", {});
+  });
+
+  it("exposes the GraphQL endpoint and api id", () => {
+    dev.template.hasOutput("GraphqlUrl", {});
+    dev.template.hasOutput("GraphqlApiId", {});
+  });
+});
+
+describe("GraphQL API (AppSync lambdalith)", () => {
+  it("defines an API-key-authorized GraphQL API with an attached schema", () => {
+    dev.template.hasResourceProperties("AWS::AppSync::GraphQLApi", {
+      AuthenticationType: "API_KEY",
+    });
+    dev.template.resourceCountIs("AWS::AppSync::GraphQLSchema", 1);
+    dev.template.resourceCountIs("AWS::AppSync::ApiKey", 1);
+  });
+
+  it("routes all six fields through APPSYNC_JS resolvers on one data source", () => {
+    dev.template.resourceCountIs("AWS::AppSync::DataSource", 1);
+    const resolvers = dev.template.findResources("AWS::AppSync::Resolver") as Record<
+      string,
+      { Properties?: { TypeName?: string; FieldName?: string; Runtime?: { Name?: string } } }
+    >;
+    const fields = Object.values(resolvers).map(
+      (resolver) => `${resolver.Properties?.TypeName}.${resolver.Properties?.FieldName}`,
+    );
+    expect(fields.sort()).toEqual([
+      "Mutation.createRecipe",
+      "Mutation.deleteRecipe",
+      "Mutation.updateRecipe",
+      "Query.getRecipe",
+      "Query.listRecipes",
+      "Query.searchRecipes",
+    ]);
+    for (const resolver of Object.values(resolvers)) {
+      expect(resolver.Properties?.Runtime?.Name).toBe("APPSYNC_JS");
+    }
+  });
+
+  it("grants the lambdalith exactly the union of the six cores' actions", () => {
+    const roleId = findFunctionRoleByEnvVars(dev.template, [
+      "VECTOR_INDEX_NAME",
+      "LIST_INDEX_NAME",
+    ]);
+    const actions = actionsOf(statementsForRole(dev.template, roleId));
+    const dynamoActions = actions.filter((action) => action.startsWith("dynamodb:")).sort();
+    expect(dynamoActions).toEqual([
+      "dynamodb:DeleteItem",
+      "dynamodb:GetItem",
+      "dynamodb:PutItem",
+      "dynamodb:Query",
+      "dynamodb:SearchVectors",
+    ]);
+    expect(actions.filter((action) => action.startsWith("bedrock:"))).toEqual([
+      "bedrock:InvokeModel",
+    ]);
+    expect(actions).not.toContain("dynamodb:*");
   });
 });

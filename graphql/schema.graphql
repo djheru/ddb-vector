@@ -1,0 +1,90 @@
+# GraphQL contract for the AppSync API. Mirrors openapi/openapi.yaml, which
+# remains the source of truth for shared shapes; a handler response change
+# updates both in the same commit.
+
+type Ingredient {
+  name: String!
+  amount: String!
+  unit: String!
+}
+
+# Stored recipes always carry every field below: recipeToItem defaults the
+# optional numerics and dietary at write time.
+type Recipe {
+  recipeId: ID!
+  name: String!
+  cuisine: String!
+  dietary: [String!]!
+  prepTimeMinutes: Int!
+  cookTimeMinutes: Int!
+  servings: Int!
+  description: String!
+  ingredients: [Ingredient!]!
+  steps: [String!]!
+}
+
+type RecipePage {
+  items: [Recipe!]!
+  nextCursor: String
+}
+
+# The search projection omits ingredients and steps, matching the REST
+# SearchResult shape. similarity = 1 - distance; sort and threshold on it.
+type SearchResult {
+  recipeId: ID!
+  name: String!
+  cuisine: String
+  description: String
+  dietary: [String!]
+  prepTimeMinutes: Int
+  cookTimeMinutes: Int
+  servings: Int
+  similarity: Float!
+  distance: Float!
+}
+
+type SearchOutput {
+  query: String!
+  cuisine: String
+  results: [SearchResult!]!
+  nextCursor: String
+}
+
+type RecipeAck {
+  recipeId: ID!
+  message: String!
+}
+
+type DeleteAck {
+  message: String!
+}
+
+input IngredientInput {
+  name: String!
+  amount: String!
+  unit: String!
+}
+
+input RecipeInput {
+  name: String!
+  cuisine: String!
+  dietary: [String!]
+  prepTimeMinutes: Int
+  cookTimeMinutes: Int
+  servings: Int
+  description: String!
+  ingredients: [IngredientInput!]!
+  steps: [String!]!
+}
+
+type Query {
+  getRecipe(recipeId: ID!): Recipe
+  listRecipes(pageSize: Int, cursor: String): RecipePage
+  searchRecipes(query: String!, cuisine: String, topK: Int, cursor: String): SearchOutput
+}
+
+type Mutation {
+  createRecipe(input: RecipeInput!): RecipeAck
+  updateRecipe(recipeId: ID!, input: RecipeInput!): RecipeAck
+  deleteRecipe(recipeId: ID!): DeleteAck
+}

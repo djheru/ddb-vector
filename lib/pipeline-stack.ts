@@ -76,12 +76,19 @@ export class PipelineStack extends Stack {
 
     const validateDev = new CodeBuildStep("ValidateDev", {
       input: source,
-      envFromCfnOutputs: { API_URL: dev.apiUrl, API_KEY_ID: dev.apiKeyId },
+      envFromCfnOutputs: {
+        API_URL: dev.apiUrl,
+        API_KEY_ID: dev.apiKeyId,
+        GRAPHQL_URL: dev.graphqlUrl,
+        GRAPHQL_API_ID: dev.graphqlApiId,
+      },
       commands: [
         // The VectorIndex custom resource blocks the Dev deployment until the
         // vector index is ACTIVE, so this step needs no index-readiness
         // polling. Do not add any.
         'export API_KEY=$(aws apigateway get-api-key --api-key "$API_KEY_ID" --include-value --query value --output text)',
+        // The AppSync api key id IS the key value (the da2-... string).
+        'export GRAPHQL_API_KEY=$(aws appsync list-api-keys --api-id "$GRAPHQL_API_ID" --query "apiKeys[0].id" --output text)',
         "npm ci",
         // One exception: two API Gateway data-plane surfaces are eventually
         // consistent and CloudFormation cannot wait on either - a brand-new
@@ -109,6 +116,12 @@ export class PipelineStack extends Stack {
           actions: ["apigateway:GET"],
           resources: [
             `arn:${this.partition}:apigateway:${this.region}::/apikeys/*`,
+          ],
+        }),
+        new PolicyStatement({
+          actions: ["appsync:ListApiKeys"],
+          resources: [
+            `arn:${this.partition}:appsync:${this.region}:${this.account}:apis/*`,
           ],
         }),
       ],

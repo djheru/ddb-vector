@@ -1,6 +1,13 @@
 import type { StackProps } from "aws-cdk-lib";
-import { CfnOutput, Duration, RemovalPolicy, Stack } from "aws-cdk-lib";
+import { CfnOutput, Duration, Expiration, RemovalPolicy, Stack } from "aws-cdk-lib";
 import { ApiDefinition, Period, SpecRestApi } from "aws-cdk-lib/aws-apigateway";
+import {
+  AuthorizationType,
+  Code,
+  Definition,
+  FunctionRuntime,
+  GraphqlApi,
+} from "aws-cdk-lib/aws-appsync";
 import {
   AttributeType,
   BillingMode,
@@ -83,6 +90,8 @@ const substitutePlaceholders = (
 export class RecipecatalogStack extends Stack {
   readonly apiUrl: CfnOutput;
   readonly apiKeyId: CfnOutput;
+  readonly graphqlUrl: CfnOutput;
+  readonly graphqlApiId: CfnOutput;
 
   constructor(scope: Construct, id: string, props: RecipecatalogStackProps) {
     super(scope, id, props);
@@ -279,6 +288,88 @@ export class RecipecatalogStack extends Stack {
     // A fresh stack must not serve traffic before the vector index exists.
     api.latestDeployment?.node.addDependency(vectorIndex);
     api.deploymentStage.node.addDependency(vectorIndex);
+
+    // ---- GraphQL API: the same six operations behind AppSync ----
+    // A single "lambdalith" data source serves every field; the function's
+    // registry dispatches on Query/Mutation + fieldName. Its IAM role is the
+    // union of the six cores' permissions: still exact actions, still scoped
+    // to this table, but without the REST side's per-endpoint isolation.
+    const appsyncFunction = makeFunction("AppSyncResolverFunction", "appsync", {
+      TABLE_NAME: table.tableName,
+      ...embeddingEnv,
+      VECTOR_INDEX_NAME,
+      SIMILARITY_THRESHOLD: DEFAULT_SIMILARITY_THRESHOLD,
+      LIST_INDEX_NAME,
+    });
+    grant(
+      appsyncFunction,
+      ["dynamodb:GetItem", "dynamodb:PutItem", "dynamodb:DeleteItem"],
+      [table.tableArn],
+    );
+    grant(
+      appsyncFunction,
+      ["dynamodb:Query"],
+      [`${table.tableArn}/index/${LIST_INDEX_NAME}`],
+    );
+    grant(
+      appsyncFunction,
+      ["dynamodb:SearchVectors"],
+      [table.tableArn, `${table.tableArn}/index/*`],
+    );
+    grant(appsyncFunction, ["bedrock:InvokeModel"], [bedrockModelArn]);
+
+    const graphqlApi = new GraphqlApi(this, "RecipeGraphqlApi", {
+      name: `${this.stackName}-graphql`,
+      definition: Definition.fromFile(
+        fileURLToPath(new URL("../graphql/schema.graphql", import.meta.url)),
+      ),
+      authorizationConfig: {
+        defaultAuthorization: {
+          authorizationType: AuthorizationType.API_KEY,
+          // 365 days is the AppSync maximum; rotation after that is manual.
+          apiKeyConfig: { expires: Expiration.after(Duration.days(365)) },
+        },
+      },
+    });
+    // Same rule as the REST deployment: no traffic before the index exists.
+    graphqlApi.node.addDependency(vectorIndex);
+
+    const lambdalithSource = graphqlApi.addLambdaDataSource(
+      "LambdalithDataSource",
+      appsyncFunction,
+    );
+    // One shared APPSYNC_JS handler: it forwards the context to the Lambda and
+    // converts the returned envelope into typed GraphQL errors (util.error).
+    // A direct resolver would flatten every thrown error to "Lambda:Unhandled".
+    const resolverCode = Code.fromAsset(
+      fileURLToPath(new URL("../graphql/resolver.js", import.meta.url)),
+    );
+    const graphqlFields: { typeName: "Query" | "Mutation"; fieldName: string }[] = [
+      { typeName: "Query", fieldName: "getRecipe" },
+      { typeName: "Query", fieldName: "listRecipes" },
+      { typeName: "Query", fieldName: "searchRecipes" },
+      { typeName: "Mutation", fieldName: "createRecipe" },
+      { typeName: "Mutation", fieldName: "updateRecipe" },
+      { typeName: "Mutation", fieldName: "deleteRecipe" },
+    ];
+    for (const { typeName, fieldName } of graphqlFields) {
+      lambdalithSource.createResolver(`${typeName}${fieldName}Resolver`, {
+        typeName,
+        fieldName,
+        runtime: FunctionRuntime.JS_1_0_0,
+        code: resolverCode,
+      });
+    }
+
+    this.graphqlUrl = new CfnOutput(this, "GraphqlUrl", {
+      value: graphqlApi.graphqlUrl,
+      description: "AppSync GraphQL endpoint",
+    });
+    this.graphqlApiId = new CfnOutput(this, "GraphqlApiId", {
+      value: graphqlApi.apiId,
+      description:
+        "AppSync API id; fetch the api key with aws appsync list-api-keys --api-id",
+    });
 
     this.apiUrl = new CfnOutput(this, "ApiUrl", {
       value: api.url,

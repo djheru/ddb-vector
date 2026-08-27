@@ -1,0 +1,36 @@
+meta {
+  name: Get Missing Recipe
+  type: graphql
+  seq: 1
+}
+
+post {
+  url: {{graphqlUrl}}
+  body: graphql
+  auth: none
+}
+
+headers {
+  x-api-key: {{graphqlApiKey}}
+}
+
+body:graphql {
+  query GetRecipe($recipeId: ID!) {
+    getRecipe(recipeId: $recipeId) {
+      recipeId
+      name
+    }
+  }
+}
+
+body:graphql:vars {
+  {
+    "recipeId": "8f1e4a5e-7c3d-4b2a-9e6f-013579bdf246"
+  }
+}
+
+assert {
+  res.status: eq 200
+  res.body.errors[0].errorType: eq NotFoundError
+  res.body.errors[0].message: eq Recipe not found
+}

@@ -1,0 +1,29 @@
+meta {
+  name: Wrong Api Key
+  type: graphql
+  seq: 3
+}
+
+post {
+  url: {{graphqlUrl}}
+  body: graphql
+  auth: none
+}
+
+headers {
+  x-api-key: not-a-real-key
+}
+
+body:graphql {
+  query ListRecipes {
+    listRecipes {
+      items {
+        recipeId
+      }
+    }
+  }
+}
+
+assert {
+  res.status: eq 401
+}

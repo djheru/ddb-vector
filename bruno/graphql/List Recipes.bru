@@ -1,0 +1,52 @@
+meta {
+  name: List Recipes
+  type: graphql
+  seq: 6
+}
+
+post {
+  url: {{graphqlUrl}}
+  body: graphql
+  auth: none
+}
+
+headers {
+  x-api-key: {{graphqlApiKey}}
+}
+
+body:graphql {
+  query ListRecipes($pageSize: Int) {
+    listRecipes(pageSize: $pageSize) {
+      items {
+        recipeId
+        name
+        cuisine
+      }
+      nextCursor
+    }
+  }
+}
+
+body:graphql:vars {
+  {
+    "pageSize": 5
+  }
+}
+
+assert {
+  res.status: eq 200
+  res.body.errors: isUndefined
+}
+
+tests {
+  test("items is an array", function () {
+    expect(res.getBody().data.listRecipes.items).to.be.an("array");
+  });
+
+  test("items are ordered by name", function () {
+    const items = res.getBody().data.listRecipes.items;
+    for (let i = 1; i < items.length; i++) {
+      expect(items[i - 1].name <= items[i].name).to.equal(true);
+    }
+  });
+}

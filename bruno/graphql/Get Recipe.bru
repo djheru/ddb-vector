@@ -1,0 +1,49 @@
+meta {
+  name: Get Recipe
+  type: graphql
+  seq: 2
+}
+
+post {
+  url: {{graphqlUrl}}
+  body: graphql
+  auth: none
+}
+
+headers {
+  x-api-key: {{graphqlApiKey}}
+}
+
+body:graphql {
+  query GetRecipe($recipeId: ID!) {
+    getRecipe(recipeId: $recipeId) {
+      recipeId
+      name
+      cuisine
+      dietary
+      prepTimeMinutes
+      cookTimeMinutes
+      servings
+      description
+      ingredients {
+        name
+        amount
+        unit
+      }
+      steps
+    }
+  }
+}
+
+body:graphql:vars {
+  {
+    "recipeId": "{{gqlRecipeId}}"
+  }
+}
+
+assert {
+  res.status: eq 200
+  res.body.errors: isUndefined
+  res.body.data.getRecipe.name: eq Spicy Chicken Stew
+  res.body.data.getRecipe.cuisine: eq mexican
+}
