@@ -1,4 +1,5 @@
 import type { APIGatewayProxyResult } from "aws-lambda";
+import type { CoreFailure } from "./results";
 
 export const jsonResponse = (statusCode: number, body: unknown): APIGatewayProxyResult => ({
   statusCode,
@@ -9,6 +10,10 @@ export const jsonResponse = (statusCode: number, body: unknown): APIGatewayProxy
 export const badRequest = (error: string): APIGatewayProxyResult => jsonResponse(400, { error });
 
 export const notFound = (error: string): APIGatewayProxyResult => jsonResponse(404, { error });
+
+/** Maps a core failure to its REST status code. */
+export const failureResponse = (failure: CoreFailure): APIGatewayProxyResult =>
+  failure.kind === "validation" ? badRequest(failure.message) : notFound(failure.message);
 
 /**
  * Every 500 body is exactly this generic message. Details are logged

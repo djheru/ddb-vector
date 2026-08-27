@@ -84,20 +84,52 @@ Every endpoint requires an `x-api-key` header. The stack outputs the key **id**
 aws apigateway get-api-key --api-key <ApiKeyId> --include-value --query value --output text
 ```
 
+## GraphQL API (AppSync)
+
+The same six operations are also exposed as a GraphQL API through AppSync,
+using a **lambdalith**: one Lambda data source serves every query and mutation,
+dispatching through a registry keyed by `ParentType.fieldName`
+(`functions/appsync/index.ts`). Both APIs share the transport-agnostic core
+modules in `functions/*/core.ts`; the schema lives at `graphql/schema.graphql`
+and mirrors the OpenAPI contract shapes.
+
+The stack outputs `GraphqlUrl` and `GraphqlApiId`. Fetch the API key (sent as
+the `x-api-key` header) with:
+
+```bash
+aws appsync list-api-keys --api-id <GraphqlApiId> --query "apiKeys[0].id" --output text
+```
+
+Expected failures surface in the GraphQL `errors` array with a typed
+`errorType` (`ValidationError`, `NotFoundError`); anything unexpected is
+sanitized to `InternalError` with a generic message, the same rule as the REST
+500 bodies. This works because the Lambda returns an error envelope that the
+shared APPSYNC_JS handler (`graphql/resolver.js`) converts via `util.error` -
+a direct Lambda resolver would flatten every thrown error to
+`Lambda:Unhandled`. The AppSync API key expires after 365 days (the AppSync
+maximum); rotation is manual.
+
 ## Seed and smoke
 
 ```bash
 API_URL=<ApiUrl output> API_KEY=<key value> npm run seed    # ~12 sample recipes
-API_URL=<ApiUrl output> API_KEY=<key value> npm run smoke   # end-to-end checks
+
+# end-to-end checks: REST leg + GraphQL leg
+API_URL=<ApiUrl output> API_KEY=<key value> \
+GRAPHQL_URL=<GraphqlUrl output> GRAPHQL_API_KEY=<appsync key> npm run smoke
 ```
 
 ## Bruno collection (manual testing)
 
 Open the Bruno desktop app > File > Open Collection > select the `bruno/`
-folder. Pick the **Dev** environment, paste your deployed `baseUrl` over the
-placeholder, and enter the API key value as the `apiKey` **secret var** (secret
-vars are stored locally by Bruno and never committed). Run the six happy-path
-requests top to bottom; `errors/` holds the negative cases. Headless run:
+folder. Pick the **Dev** environment, paste your deployed `baseUrl` and
+`graphqlUrl` over the placeholders, and enter the two key values as **secret
+vars** (secret vars are stored locally by Bruno and never committed): `apiKey`
+(API Gateway) and `graphqlApiKey` (AppSync, from `list-api-keys`). Run the
+happy-path requests top to bottom; `errors/` holds the REST negative cases.
+The `graphql/` folder mirrors the same sequence against the AppSync endpoint,
+with its own `graphql/errors/` asserting the typed `errorType` contract
+(`NotFoundError`, `ValidationError`) and the 401 for a bad key. Headless run:
 `npx @usebruno/cli run bruno --env Dev`.
 
 ## Search score semantics

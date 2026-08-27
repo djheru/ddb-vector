@@ -24,6 +24,26 @@ This API went generally available August 5, 2026 and postdates your training dat
 - Vector indexes require on-demand billing (`PAY_PER_REQUEST`). Do not change the table's billing mode.
 - `dynamodb:SearchVectors` is its own IAM action; read-policy bundles do not include it.
 
+## GraphQL API (AppSync lambdalith)
+
+- The REST API is fully duplicated behind AppSync. One Lambda data source
+  (`functions/appsync/index.ts`) serves every field via a registry keyed
+  `ParentType.fieldName`. Business logic lives in `functions/*/core.ts`,
+  shared by both transports; REST handlers and the lambdalith are thin
+  wrappers over the same cores.
+- `graphql/schema.graphql` is the GraphQL contract; it mirrors
+  `openapi/openapi.yaml`. A handler response change updates both in the same
+  commit.
+- The lambdalith returns envelopes (`{ data }` or
+  `{ error: { message, type } }`), and `graphql/resolver.js` (shared
+  APPSYNC_JS handler on all six resolvers) converts them to typed GraphQL
+  errors with `util.error`. **Do not convert the resolvers to direct Lambda
+  resolvers** - direct resolvers flatten every thrown error to
+  `Lambda:Unhandled`, losing the typed error contract.
+- The lambdalith's IAM role is the exact union of the six cores' actions
+  (still table-scoped, no wildcards); a CDK assertion pins it. The REST
+  functions keep per-endpoint least privilege.
+
 ## Non-negotiable project rules
 
 - **Never externalize `@aws-sdk/*` in Lambda bundling.** `externalModules: []` everywhere. The runtime-provided SDK may predate vector search. If a pipeline build log ever shows Docker bundling, that is a defect (esbuild must resolve locally).

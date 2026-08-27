@@ -4,7 +4,8 @@
  * blocked the deployment until the index was ACTIVE, so there are no waits,
  * sleeps, or readiness retries here by design.
  *
- * Usage: API_URL=https://... API_KEY=... npx tsx scripts/smoke.ts
+ * Usage: API_URL=https://... API_KEY=... GRAPHQL_URL=https://... \
+ *        GRAPHQL_API_KEY=... npx tsx scripts/smoke.ts
  */
 import { randomUUID } from "node:crypto";
 import type { RecipeInput } from "../functions/shared/types";
@@ -20,6 +21,8 @@ const requireEnv = (name: string): string => {
 
 const apiUrl = requireEnv("API_URL").replace(/\/$/, "");
 const apiKey = requireEnv("API_KEY");
+const graphqlUrl = requireEnv("GRAPHQL_URL");
+const graphqlApiKey = requireEnv("GRAPHQL_API_KEY");
 
 // Matches the search function's default SIMILARITY_THRESHOLD.
 const SIMILARITY_THRESHOLD = 0.15;
@@ -77,6 +80,165 @@ interface SearchResult {
   cuisine?: string;
   similarity: number;
 }
+
+interface GraphqlError {
+  errorType?: string;
+  message?: string;
+}
+
+interface GraphqlResult {
+  status: number;
+  data: Record<string, unknown>;
+  errors: GraphqlError[];
+}
+
+const graphql = async (
+  query: string,
+  variables: Record<string, unknown> = {},
+  keyOverride?: string,
+): Promise<GraphqlResult> => {
+  const response = await fetch(graphqlUrl, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "x-api-key": keyOverride ?? graphqlApiKey,
+    },
+    body: JSON.stringify({ query, variables }),
+  });
+  const text = await response.text();
+  let parsed: Record<string, unknown> = {};
+  try {
+    parsed = JSON.parse(text) as Record<string, unknown>;
+  } catch {
+    parsed = { raw: text };
+  }
+  return {
+    status: response.status,
+    data: (parsed.data ?? {}) as Record<string, unknown>,
+    errors: (parsed.errors ?? []) as GraphqlError[],
+  };
+};
+
+const CREATE_RECIPE_MUTATION = `mutation CreateRecipe($input: RecipeInput!) {
+  createRecipe(input: $input) { recipeId message }
+}`;
+
+const GET_RECIPE_QUERY = `query GetRecipe($recipeId: ID!) {
+  getRecipe(recipeId: $recipeId) { recipeId name cuisine description }
+}`;
+
+const SEARCH_RECIPES_QUERY = `query SearchRecipes($query: String!, $cuisine: String, $topK: Int) {
+  searchRecipes(query: $query, cuisine: $cuisine, topK: $topK) {
+    results { recipeId cuisine similarity distance }
+  }
+}`;
+
+const LIST_RECIPES_QUERY = `query ListRecipes($pageSize: Int) {
+  listRecipes(pageSize: $pageSize) { items { recipeId name } nextCursor }
+}`;
+
+const UPDATE_RECIPE_MUTATION = `mutation UpdateRecipe($recipeId: ID!, $input: RecipeInput!) {
+  updateRecipe(recipeId: $recipeId, input: $input) { recipeId message }
+}`;
+
+const DELETE_RECIPE_MUTATION = `mutation DeleteRecipe($recipeId: ID!) {
+  deleteRecipe(recipeId: $recipeId) { message }
+}`;
+
+/**
+ * The GraphQL leg mirrors the REST flow through the AppSync lambdalith, then
+ * pins the parts REST cannot express: the typed errorType contract that
+ * graphql/resolver.js preserves, and AppSync's 401 for a bad api key.
+ */
+const graphqlChecks = async (): Promise<void> => {
+  let recipeId: string | undefined;
+  let deleted = false;
+
+  try {
+    // 1. Create through the mutation.
+    const created = await graphql(CREATE_RECIPE_MUTATION, { input: smokeRecipe });
+    check(created.status === 200, `graphql create returns 200 (got ${created.status})`);
+    check(created.errors.length === 0, "graphql create returns no errors");
+    const createAck = created.data.createRecipe as { recipeId?: string } | null | undefined;
+    recipeId = createAck?.recipeId;
+    check(typeof recipeId === "string", "graphql create returns a recipeId");
+    if (!recipeId) throw new Error("cannot continue without a graphql recipeId");
+
+    // 2. Get it back; the embedding is unreachable by schema, so only the
+    //    stored fields are asserted.
+    const fetched = await graphql(GET_RECIPE_QUERY, { recipeId });
+    const fetchedRecipe = fetched.data.getRecipe as { name?: string } | null | undefined;
+    check(fetchedRecipe?.name === smokeRecipe.name, "graphql get returns the stored name");
+
+    // 3. Paraphrase search finds it through the same vector index.
+    const search = await graphql(SEARCH_RECIPES_QUERY, { query: "hot and hearty poultry dish" });
+    check(search.errors.length === 0, "graphql search returns no errors");
+    const searchOutput = search.data.searchRecipes as { results?: SearchResult[] } | null;
+    const results = searchOutput?.results ?? [];
+    const match = results.find((result) => result.recipeId === recipeId);
+    check(match !== undefined, "graphql semantic search finds the created recipe");
+    check(
+      (match?.similarity ?? 0) > SIMILARITY_THRESHOLD,
+      `graphql similarity ${match?.similarity ?? "n/a"} is above the ${SIMILARITY_THRESHOLD} threshold`,
+    );
+
+    // 4. Cuisine filter narrows to one cuisine.
+    const filtered = await graphql(SEARCH_RECIPES_QUERY, {
+      query: "something spicy",
+      cuisine: "mexican",
+      topK: 5,
+    });
+    const filteredOutput = filtered.data.searchRecipes as { results?: SearchResult[] } | null;
+    check(
+      (filteredOutput?.results ?? []).every((result) => result.cuisine === "mexican"),
+      "graphql cuisine filter returns only mexican recipes",
+    );
+
+    // 5. List returns a page.
+    const listed = await graphql(LIST_RECIPES_QUERY, { pageSize: 5 });
+    const listOutput = listed.data.listRecipes as { items?: unknown[] } | null;
+    check(Array.isArray(listOutput?.items), "graphql list returns an items array");
+
+    // 6. Update succeeds through the conditional write.
+    const updated = await graphql(UPDATE_RECIPE_MUTATION, {
+      recipeId,
+      input: { ...smokeRecipe, description: `${smokeRecipe.description} Updated via GraphQL.` },
+    });
+    const updateAck = updated.data.updateRecipe as { message?: string } | null | undefined;
+    check(updateAck?.message === "Recipe updated", "graphql update acknowledges");
+
+    // 7. Typed error contract: a missing recipe surfaces as NotFoundError in
+    //    the errors array (HTTP status stays 200 in GraphQL).
+    const ghost = await graphql(GET_RECIPE_QUERY, { recipeId: randomUUID() });
+    check(
+      ghost.errors[0]?.errorType === "NotFoundError",
+      `graphql missing recipe yields errorType NotFoundError (got ${ghost.errors[0]?.errorType ?? "none"})`,
+    );
+
+    // 8. Typed error contract: handler-level validation yields ValidationError.
+    const invalid = await graphql(CREATE_RECIPE_MUTATION, {
+      input: { ...smokeRecipe, description: "Short" },
+    });
+    check(
+      invalid.errors[0]?.errorType === "ValidationError",
+      `graphql invalid input yields errorType ValidationError (got ${invalid.errors[0]?.errorType ?? "none"})`,
+    );
+
+    // 9. A bad api key is rejected by AppSync with 401 (vs API Gateway's 403).
+    const badKey = await graphql(LIST_RECIPES_QUERY, {}, "not-a-real-key");
+    check(badKey.status === 401, `graphql request with a bad key returns 401 (got ${badKey.status})`);
+
+    // 10. Delete it.
+    const removed = await graphql(DELETE_RECIPE_MUTATION, { recipeId });
+    const deleteAck = removed.data.deleteRecipe as { message?: string } | null | undefined;
+    check(deleteAck?.message === "Recipe deleted", "graphql delete acknowledges");
+    deleted = deleteAck?.message === "Recipe deleted";
+  } finally {
+    if (recipeId && !deleted) {
+      await graphql(DELETE_RECIPE_MUTATION, { recipeId }).catch(() => undefined);
+    }
+  }
+};
 
 const main = async (): Promise<void> => {
   let recipeId: string | undefined;
@@ -207,6 +369,10 @@ const main = async (): Promise<void> => {
       await request("DELETE", `/recipes/${recipeId}`).catch(() => undefined);
     }
   }
+
+  // The GraphQL leg runs after the REST leg so its paraphrase search cannot
+  // match the (already deleted) REST smoke recipe.
+  await graphqlChecks();
 
   if (failures > 0) {
     console.error(`Smoke test failed: ${failures} assertion(s) did not hold`);

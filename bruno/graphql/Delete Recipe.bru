@@ -1,0 +1,35 @@
+meta {
+  name: Delete Recipe
+  type: graphql
+  seq: 7
+}
+
+post {
+  url: {{graphqlUrl}}
+  body: graphql
+  auth: none
+}
+
+headers {
+  x-api-key: {{graphqlApiKey}}
+}
+
+body:graphql {
+  mutation DeleteRecipe($recipeId: ID!) {
+    deleteRecipe(recipeId: $recipeId) {
+      message
+    }
+  }
+}
+
+body:graphql:vars {
+  {
+    "recipeId": "{{gqlRecipeId}}"
+  }
+}
+
+assert {
+  res.status: eq 200
+  res.body.errors: isUndefined
+  res.body.data.deleteRecipe.message: eq Recipe deleted
+}
